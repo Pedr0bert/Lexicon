@@ -12,6 +12,30 @@ window.Lexicon = window.Lexicon || {};
     let activeTextarea = null;
     let currentMatchStart = -1;
 
+    const U = () => window.Lexicon.Utils;
+    const esc = (v) => U().escapeHTML(v);
+    const tr = (k, f, p) => U().tr(k, f, p);
+    const WIKILINK_RE = /\[\[([^\]\|\n]+)(?:\|([^\]\n]+))?\]\]/g;
+
+    /** Wikilink text for an article: [[Title]] or [[id|Title]] when the title has special chars */
+    function wikilinkFor(article) {
+        const title = String(article.title || '').replace(/\s+/g, ' ').trim();
+        if (!title || /[\[\]|]/.test(title)) {
+            const label = title.replace(/[\[\]|]/g, ' ').replace(/\s+/g, ' ').trim() || String(article.id);
+            return `[[${article.id}|${label}]]`;
+        }
+        return `[[${title}]]`;
+    }
+
+    /** Does a wikilink target refer to the article (by id or exact title)? */
+    function refersTo(target, article) {
+        const ref = String(target || '').trim().toLowerCase();
+        if (!ref) return false;
+        if (ref === String(article.id)) return true;
+        const title = String(article.title || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        return !!title && ref === title;
+    }
+
     /**
      * Create floating autocomplete container if not already in DOM
      */
@@ -57,13 +81,13 @@ window.Lexicon = window.Lexicon || {};
         if (matches.length === 0) {
             el.innerHTML = `
                 <div class="px-3 py-2 text-earth/70 italic text-[11px]">
-                    Nenhum documento encontrado para "${window.Lexicon.Utils.escapeHTML(query)}"
+                    ${esc(tr('zettelkasten.noMatch', 'Nenhum documento encontrado para "{query}"', { query }))}
                 </div>
             `;
         } else {
             el.innerHTML = `
                 <div class="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-earth/70 border-b border-wood/50 flex justify-between">
-                    <span>Conectar Documento ([[Wikilink]])</span>
+                    <span>${esc(tr('zettelkasten.connectHeader', 'Conectar Documento ([[Wikilink]])'))}</span>
                     <span class="text-[9px] font-mono">↑↓ Enter</span>
                 </div>
                 <div class="py-1 space-y-0.5">
@@ -71,9 +95,9 @@ window.Lexicon = window.Lexicon || {};
                         const isSelected = idx === selectedIndex;
                         const safeTitle = window.Lexicon.Utils.escapeHTML(art.title || 'Sem título');
                         const safeAuthor = window.Lexicon.Utils.escapeHTML(art.authors ? ` • ${art.authors}` : '');
-                        const safeYear = art.year ? ` (${art.year})` : '';
+                        const safeYear = art.year ? ` (${esc(art.year)})` : '';
                         return `
-                            <div class="wikilink-item px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-2 ${isSelected ? 'bg-jungle text-white font-semibold' : 'hover:bg-sand text-soil'}"
+                            <div role="option" aria-selected="${isSelected}" class="wikilink-item px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors flex items-center gap-2 ${isSelected ? 'bg-jungle text-white font-semibold' : 'hover:bg-sand text-soil'}"
                                  data-index="${idx}">
                                 <i class="ph ph-file-text text-sm shrink-0 ${isSelected ? 'text-white' : 'text-jungle'}"></i>
                                 <div class="min-w-0 flex-1">
@@ -138,7 +162,7 @@ window.Lexicon = window.Lexicon || {};
         if (!match) return;
 
         const matchStartIndex = prefix.lastIndexOf('[[');
-        const replacement = `[[${article.title}]] `;
+        const replacement = `${wikilinkFor(article)} `;
 
         textarea.value = val.substring(0, matchStartIndex) + replacement + val.substring(cursor);
         const newCursorPos = matchStartIndex + replacement.length;
@@ -153,6 +177,14 @@ window.Lexicon = window.Lexicon || {};
 
     window.Lexicon.Zettelkasten = {
         init() {
+            if (this._initialized) return;
+            this._initialized = true;
+            document.addEventListener('keydown', (e) => {
+                if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.closest && e.target.closest('[data-zk-open]')) {
+                    e.preventDefault();
+                    e.target.closest('[data-zk-open]').click();
+                }
+            });
             // Global click listener to close dropdown when clicking outside
             document.addEventListener('click', (e) => {
                 if (activeDropdown && !activeDropdown.contains(e.target) && e.target !== activeTextarea) {
@@ -160,8 +192,15 @@ window.Lexicon = window.Lexicon || {};
                 }
             });
 
-            // Global click handler for rendered wikilinks
+            // Global click handler for rendered wikilinks and backlink cards
             document.addEventListener('click', (e) => {
+                const card = e.target.closest('[data-zk-open]');
+                if (card) {
+                    e.preventDefault();
+                    const id = Number(card.dataset.zkOpen);
+                    if (id) this.openArticle(id);
+                    return;
+                }
                 const badge = e.target.closest('[data-wikilink-target]');
                 if (badge) {
                     e.preventDefault();
@@ -223,7 +262,9 @@ window.Lexicon = window.Lexicon || {};
                         insertSelectedWikilink(selectedIndex);
                     }
                 } else if (e.key === 'Escape') {
+                    // preventDefault tells the modal manager this Escape was consumed
                     e.preventDefault();
+                    e.stopPropagation();
                     hideDropdown();
                 }
             });
@@ -264,10 +305,10 @@ window.Lexicon = window.Lexicon || {};
         renderWikilinks(text) {
             if (!text) return '';
             const safe = window.Lexicon.Utils.escapeHTML(text);
-            return safe.replace(/\[\[([^\]\|\n]+)(?:\|([^\]\n]+))?\]\]/g, (match, target, alias) => {
+            return safe.replace(WIKILINK_RE, (match, target, alias) => {
                 const label = (alias || target).trim();
                 const rawTarget = target.trim();
-                return `<span class="wikilink-badge cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-jungle/10 hover:bg-jungle/20 text-canopy border border-jungle/30 text-xs font-medium transition-colors select-none" data-wikilink-target="${rawTarget}" title="Abrir documento: ${rawTarget}"><i class="ph ph-link-simple text-[11px] text-jungle"></i><span>${label}</span></span>`;
+                return `<span class="wikilink-badge cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-jungle/10 hover:bg-jungle/20 text-canopy border border-jungle/30 text-xs font-medium transition-colors select-none" data-wikilink-target="${rawTarget}" role="link" tabindex="0" title="${esc(tr('zettelkasten.openDoc', 'Abrir documento'))}: ${rawTarget}"><i class="ph ph-link-simple text-[11px] text-jungle"></i><span>${label}</span></span>`;
             });
         },
 
@@ -280,9 +321,6 @@ window.Lexicon = window.Lexicon || {};
             if (!targetArticle) return [];
             const state = window.Lexicon.State;
             const all = state.articles || [];
-            const targetId = String(targetArticle.id);
-            const targetTitle = (targetArticle.title || '').trim().toLowerCase();
-
             const backlinks = [];
 
             for (const art of all) {
@@ -290,30 +328,16 @@ window.Lexicon = window.Lexicon || {};
                 const notes = art.notes || '';
                 if (!notes.includes('[[')) continue;
 
-                // Match [[targetId]] or [[targetTitle]] or [[targetTitle|alias]]
-                const regex = /\[\[([^\]\|\n]+)(?:\|[^\]\n]+)?\]\]/g;
+                const regex = new RegExp(WIKILINK_RE.source, 'g');
                 let match;
-                let foundInArticle = false;
-                let snippet = '';
-
                 while ((match = regex.exec(notes)) !== null) {
-                    const referenced = match[1].trim().toLowerCase();
-                    if (referenced === targetId || (targetTitle && referenced === targetTitle) || (targetTitle && referenced.length > 5 && targetTitle.includes(referenced))) {
-                        foundInArticle = true;
-                        
-                        // Extract surrounding sentence
+                    if (refersTo(match[1], targetArticle)) {
                         const start = Math.max(0, match.index - 40);
                         const end = Math.min(notes.length, match.index + match[0].length + 60);
-                        snippet = (start > 0 ? '...' : '') + notes.substring(start, end).replace(/\n+/g, ' ').trim() + (end < notes.length ? '...' : '');
+                        const snippet = (start > 0 ? '...' : '') + notes.substring(start, end).replace(/\n+/g, ' ').trim() + (end < notes.length ? '...' : '');
+                        backlinks.push({ sourceArticle: art, snippet });
                         break;
                     }
-                }
-
-                if (foundInArticle) {
-                    backlinks.push({
-                        sourceArticle: art,
-                        snippet: snippet
-                    });
                 }
             }
 
@@ -326,50 +350,52 @@ window.Lexicon = window.Lexicon || {};
          * @param {HTMLElement} containerEl
          */
         renderBacklinks(article, containerEl) {
-            if (!containerEl) return;
+            if (!containerEl || !article) return;
             const backlinks = this.getBacklinks(article);
 
             if (backlinks.length === 0) {
                 containerEl.innerHTML = `
                     <div class="p-3 bg-sand/50 border border-wood/60 rounded-xl text-center">
-                        <p class="text-xs text-earth/80">
-                            Nenhum documento cita este artigo ainda.
-                        </p>
+                        <p class="text-xs text-earth/80">${esc(tr('zettelkasten.noBacklinks', 'Nenhum documento cita este artigo ainda.'))}</p>
                         <p class="text-[11px] text-earth/60 mt-0.5">
-                            Digite <code class="bg-wood/40 px-1 py-0.5 rounded text-soil">[[${window.Lexicon.Utils.escapeHTML(article.title || 'Título')}]]</code> nas anotações de outro artigo para conectá-los.
+                            ${esc(tr('zettelkasten.howToLinkPrefix', 'Digite'))} <code class="bg-wood/40 px-1 py-0.5 rounded text-soil">${esc(wikilinkFor(article))}</code> ${esc(tr('zettelkasten.howToLinkSuffix', 'nas anotações de outro artigo para conectá-los.'))}
                         </p>
                     </div>
                 `;
                 return;
             }
 
+            const mentionWord = backlinks.length === 1
+                ? tr('zettelkasten.mention', 'menção')
+                : tr('zettelkasten.mentions', 'menções');
+            const Articles = window.Lexicon.Articles;
+
             containerEl.innerHTML = `
                 <div class="space-y-2">
                     <div class="flex items-center justify-between text-[11px] text-earth font-medium">
-                        <span>Conexões ativas no seu Zettelkasten:</span>
-                        <span class="px-2 py-0.5 bg-jungle/10 text-canopy rounded-full font-bold">${backlinks.length} ${backlinks.length === 1 ? 'menção' : 'menções'}</span>
+                        <span>${esc(tr('zettelkasten.activeConnections', 'Conexões ativas no seu Zettelkasten:'))}</span>
+                        <span class="px-2 py-0.5 bg-jungle/10 text-canopy rounded-full font-bold">${backlinks.length} ${esc(mentionWord)}</span>
                     </div>
                     <div class="space-y-1.5">
                         ${backlinks.map(b => {
                             const art = b.sourceArticle;
-                            const safeTitle = window.Lexicon.Utils.escapeHTML(art.title);
-                            const safeSnippet = window.Lexicon.Utils.escapeHTML(b.snippet);
                             const statusColor = art.status === 'reading' ? 'text-jungle bg-jungle/10' :
                                                art.status === 'processing' ? 'text-leaf bg-leaf/10' :
                                                art.status === 'archived' ? 'text-earth bg-wood/40' :
                                                'text-terracotta bg-terracotta/10';
+                            const statusLabel = Articles && Articles.getStatusLabel ? Articles.getStatusLabel(art.status) : art.status;
                             return `
                                 <div class="p-2.5 bg-sand/70 hover:bg-sand border border-wood/70 hover:border-jungle/40 rounded-xl cursor-pointer transition-all shadow-2xs group"
-                                     onclick="Lexicon.Articles.inspect(${art.id})">
+                                     data-zk-open="${Number(art.id)}" role="button" tabindex="0">
                                     <div class="flex items-center justify-between gap-2 mb-1">
                                         <div class="flex items-center gap-1.5 min-w-0">
-                                            <i class="ph ph-arrow-bend-down-right text-jungle text-xs shrink-0 group-hover:translate-x-0.5 transition-transform"></i>
-                                            <span class="text-xs font-serif font-bold text-soil truncate group-hover:text-jungle transition-colors">${safeTitle}</span>
+                                            <i class="ph ph-arrow-bend-down-right text-jungle text-xs shrink-0 group-hover:translate-x-0.5 transition-transform" aria-hidden="true"></i>
+                                            <span class="text-xs font-serif font-bold text-soil truncate group-hover:text-jungle transition-colors">${esc(art.title)}</span>
                                         </div>
-                                        <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${statusColor} shrink-0">${art.status}</span>
+                                        <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${statusColor} shrink-0">${esc(statusLabel)}</span>
                                     </div>
                                     <div class="text-[11px] text-earth italic font-serif pl-4 border-l-2 border-wood/60 line-clamp-2">
-                                        "${safeSnippet}"
+                                        "${esc(b.snippet)}"
                                     </div>
                                 </div>
                             `;
@@ -379,40 +405,65 @@ window.Lexicon = window.Lexicon || {};
             `;
         },
 
+        /** Open an article in the reader (if open) or the inspector */
+        openArticle(id) {
+            const L = window.Lexicon;
+            if (L.Reader && L.Reader.isOpen()) {
+                L.Reader.open(id);
+            } else if (L.Articles) {
+                L.Articles.inspect(id);
+            }
+        },
+
         /**
          * Navigate to an article by target string (ID or Title)
          * @param {string} target
          */
         navigateToArticle(target) {
             if (!target) return;
-            const state = window.Lexicon.State;
-            const all = state.articles || [];
-            const cleanTarget = target.trim().toLowerCase();
+            const all = window.Lexicon.State.articles || [];
+            const cleanTarget = String(target).trim().toLowerCase();
 
-            // Try exact ID match first
-            let found = all.find(a => String(a.id) === cleanTarget);
-
-            // Try exact title match
+            let found = all.find(a => refersTo(cleanTarget, a));
             if (!found) {
-                found = all.find(a => (a.title || '').trim().toLowerCase() === cleanTarget);
-            }
-
-            // Try partial title match
-            if (!found) {
-                found = all.find(a => (a.title || '').trim().toLowerCase().includes(cleanTarget));
+                // Only accept a partial title match when it is unambiguous
+                const partial = all.filter(a => (a.title || '').trim().toLowerCase().includes(cleanTarget));
+                if (partial.length === 1) found = partial[0];
             }
 
             if (found) {
-                // If Split-View Reader is currently open, switch to that article in reader!
-                if (window.Lexicon.Reader && window.Lexicon.Reader.isOpen()) {
-                    window.Lexicon.Reader.open(found.id);
-                } else {
-                    window.Lexicon.Articles.inspect(found.id);
-                }
+                this.openArticle(found.id);
             } else {
-                const msg = `Artigo "${target}" referenciado no Wikilink não foi encontrado no acervo.`;
-                window.Lexicon.UI.Toast.show(msg, 'error');
+                window.Lexicon.UI.Toast.show(
+                    tr('zettelkasten.notFound', 'Artigo "{target}" referenciado no Wikilink não foi encontrado no acervo.', { target }),
+                    'error');
             }
-        }
+        },
+
+        /**
+         * Keep [[Old Title]] links working after a document is renamed.
+         * @returns {number} number of notes updated
+         */
+        renameTitleReferences(oldTitle, newTitle, articleId) {
+            const oldT = String(oldTitle || '').replace(/\s+/g, ' ').trim();
+            if (!oldT || oldT === String(newTitle || '').trim()) return 0;
+            const replacementTarget = wikilinkFor({ id: articleId, title: newTitle });
+            let updated = 0;
+            (window.Lexicon.State.articles || []).forEach(art => {
+                if (!art.notes || !art.notes.includes('[[')) return;
+                const next = art.notes.replace(new RegExp(WIKILINK_RE.source, 'g'), (m, target, alias) => {
+                    if (String(target).trim().toLowerCase() !== oldT.toLowerCase()) return m;
+                    if (alias) return `[[${articleId}|${alias}]]`;
+                    return replacementTarget;
+                });
+                if (next !== art.notes) {
+                    art.notes = next;
+                    updated++;
+                }
+            });
+            return updated;
+        },
+
+        wikilinkFor
     };
 })();

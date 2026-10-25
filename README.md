@@ -140,7 +140,7 @@ Lexicon gives you two ways to interact with collections:
 
 ### 4. Multi-File & Directory Import
 
-Click **"Add Document"** in the sidebar or header (or press <kbd>Ctrl + N</kbd>) to access three upload modes:
+Click **"Add Document"** in the sidebar or header (or press <kbd>Alt + N</kbd>) to access three upload modes:
 
 1. **Single File:** Fill out title, authors, year, DOI, tags, and attach a local file.
 2. **Bulk Files:** Select multiple PDF, EPUB, or document files at once.
@@ -302,3 +302,22 @@ Tested and supported on modern browsers with ES6, IndexedDB, and File API suppor
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE) — free to use, modify, and distribute for personal, academic, and commercial research purposes.
+
+
+---
+
+## Security, Storage & Development Notes (v5.1)
+
+- **Run it with `./start.sh`** (or `python3 server.py`). The server listens on `127.0.0.1` only, serves just the app files (never `.git`, logs or sources) and proxies a small allow-list of Ollama endpoints (`/api/tags`, `/api/generate`, `/api/chat`, `/api/show`, ...). Requests coming from other websites are rejected. Set `LEXICON_HOST=0.0.0.0` only if you really want LAN access.
+- **Content-Security-Policy:** the app has no inline scripts or inline event handlers. UI actions are declared with `data-lx-click="Module.method"` / `data-lx-args='[...]'` and dispatched by `js/app.js`.
+- **PDF.js 4.10.38** (ES module, loaded by `js/pdf-loader.mjs`) is used with `isEvalSupported: false`. Serve the app over `http://` for PDF text extraction.
+- **Storage:** catalog, extracted text and binary files live in IndexedDB. The app requests persistent storage, merges concurrent saves from multiple tabs, and handles quota errors. Use **Full backup (.zip)** to export catalog + files; imports accept `.json` or `.zip` and can merge or replace.
+- **AI:** prefer general instruction models (e.g. `qwen2.5:3b`, `llama3.2:3b`, `gemma3`). Model output is sanitized, new collections require confirmation, and replacing notes keeps your originals.
+
+### Development
+
+```bash
+npm install          # only needed to rebuild CSS
+npm run build:css    # regenerates css/tailwind.css from index.html + js/**
+npm run check        # syntax check, i18n key coverage, no-inline-handler (CSP) check
+```

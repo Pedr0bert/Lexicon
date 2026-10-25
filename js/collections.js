@@ -5,6 +5,10 @@
 window.Lexicon = window.Lexicon || {};
 
 (function() {
+    const U = () => window.Lexicon.Utils;
+    const esc = (s) => U().escapeHTML(s);
+    const tr = (k, f, p) => U().tr(k, f, p);
+
     window.Lexicon.Collections = {
         /**
          * Initialize event delegation for collections list
@@ -14,7 +18,6 @@ window.Lexicon = window.Lexicon || {};
             if (container && !container._hasDelegation) {
                 container._hasDelegation = true;
                 container.addEventListener('click', (e) => {
-                    // Toggle expand/reduce
                     const expandBtn = e.target.closest('[data-action="toggle-collection-expand"]');
                     if (expandBtn) {
                         e.stopPropagation();
@@ -23,7 +26,13 @@ window.Lexicon = window.Lexicon || {};
                         return;
                     }
 
-                    // Delete collection
+                    const renameBtn = e.target.closest('[data-action="rename-collection"]');
+                    if (renameBtn) {
+                        e.stopPropagation();
+                        this.promptRename(renameBtn.dataset.collectionId);
+                        return;
+                    }
+
                     const deleteBtn = e.target.closest('[data-action="delete-collection"]');
                     if (deleteBtn) {
                         e.stopPropagation();
@@ -33,7 +42,6 @@ window.Lexicon = window.Lexicon || {};
                         return;
                     }
 
-                    // Inspect sub-article
                     const inspectItem = e.target.closest('[data-action="inspect-article"]');
                     if (inspectItem) {
                         e.stopPropagation();
@@ -44,39 +52,64 @@ window.Lexicon = window.Lexicon || {};
                         return;
                     }
 
-                    // Select collection
                     const selectDiv = e.target.closest('[data-action="select-collection"]');
                     if (selectDiv) {
                         const colName = selectDiv.dataset.collectionName;
                         if (colName) this.select(colName);
-                        return;
+                    }
+                });
+
+                container.addEventListener('keydown', (e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    const target = e.target.closest('[data-action="select-collection"], [data-action="inspect-article"]');
+                    if (target) {
+                        e.preventDefault();
+                        target.click();
                     }
                 });
             }
         },
 
-        /**
-         * Toggle expand / reduce of the entire Collections section in the sidebar
-         */
-        toggleSidebarSection() {
-            const state = window.Lexicon.State;
-            state.sidebarCollectionsCollapsed = !state.sidebarCollectionsCollapsed;
-            const chevron = document.getElementById('sidebar-collections-chevron');
-            const container = document.getElementById('collections-list');
-
-            if (state.sidebarCollectionsCollapsed) {
-                if (chevron) chevron.className = 'ph ph-caret-right text-xs text-earth group-hover:text-jungle transition-transform';
-                if (container) container.classList.add('hidden');
-            } else {
-                if (chevron) chevron.className = 'ph ph-caret-down text-xs text-earth group-hover:text-jungle transition-transform';
-                if (container) container.classList.remove('hidden');
-                this.render();
-            }
+        /** Find a collection by name (case-insensitive) */
+        findByName(name) {
+            if (!name) return null;
+            const lower = String(name).trim().toLowerCase();
+            return window.Lexicon.State.collections.find(c => c.name.toLowerCase() === lower) || null;
         },
 
         /**
-         * Toggle expansion of an individual collection in the sidebar tree
+         * Build <option> list for a collection <select>, fully escaped.
+         * @param {{noneLabel?: string, noneValue?: string, extra?: string}} [opts]
          */
+        optionsHtml(opts = {}) {
+            const state = window.Lexicon.State;
+            const noneLabel = opts.noneLabel || `(${tr('folders.unfiled', 'Sem coleção')})`;
+            const noneValue = opts.noneValue !== undefined ? opts.noneValue : '';
+            return (opts.extra || '') +
+                `<option value="${esc(noneValue)}">${esc(noneLabel)}</option>` +
+                state.collections.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
+        },
+
+        /** Fill a <select> with collections and select `value` (adds it if unknown) */
+        fillSelect(select, value, opts = {}) {
+            if (!select) return;
+            select.innerHTML = this.optionsHtml(opts);
+            const v = value || '';
+            if (v && !Array.from(select.options).some(o => o.value === v)) {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = v;
+                select.appendChild(opt);
+            }
+            select.value = v;
+        },
+
+        toggleSidebarSection() {
+            const state = window.Lexicon.State;
+            state.sidebarCollectionsCollapsed = !state.sidebarCollectionsCollapsed;
+            this.render();
+        },
+
         toggleSidebarCollectionExpand(colName) {
             const state = window.Lexicon.State;
             state.expandedSidebarCollections = state.expandedSidebarCollections || [];
@@ -89,16 +122,10 @@ window.Lexicon = window.Lexicon || {};
             this.render();
         },
 
-        /**
-         * Open modal to create collection
-         */
         openCreateModal() {
             const input = document.getElementById('new-collection-name');
             if (input) input.value = '';
-            window.Lexicon.UI.Modal.open('collection-modal');
-            setTimeout(() => {
-                if (input) input.focus();
-            }, 80);
+            window.Lexicon.UI.Modal.open('collection-modal', { focus: '#new-collection-name' });
         },
 
         /**
@@ -110,39 +137,35 @@ window.Lexicon = window.Lexicon || {};
             const chevron = document.getElementById('sidebar-collections-chevron');
             if (!container) return;
 
+            const toggleBtn = chevron ? chevron.closest('button') : null;
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(!state.sidebarCollectionsCollapsed));
+
             if (state.sidebarCollectionsCollapsed) {
                 container.classList.add('hidden');
                 if (chevron) chevron.className = 'ph ph-caret-right text-xs text-earth group-hover:text-jungle transition-transform';
                 return;
-            } else {
-                container.classList.remove('hidden');
-                if (chevron) chevron.className = 'ph ph-caret-down text-xs text-earth group-hover:text-jungle transition-transform';
             }
+            container.classList.remove('hidden');
+            if (chevron) chevron.className = 'ph ph-caret-down text-xs text-earth group-hover:text-jungle transition-transform';
 
-            // Recalculate article counts & map articles by collection
             const counts = {};
             const articlesByCol = {};
             state.articles.forEach(a => {
-                if (a.collection && a.collection !== 'none') {
+                if (a.collection) {
                     counts[a.collection] = (counts[a.collection] || 0) + 1;
-                    articlesByCol[a.collection] = articlesByCol[a.collection] || [];
-                    articlesByCol[a.collection].push(a);
+                    (articlesByCol[a.collection] = articlesByCol[a.collection] || []).push(a);
                 }
             });
 
-            const i18n = window.Lexicon.I18n;
-            const noColText = i18n ? i18n.t('collections.noCollections') : 'No collections yet';
-            const emptyFolderText = i18n ? i18n.t('collections.emptyFolder') : '(Empty folder)';
-            const reduceTitle = i18n ? i18n.t('collections.reduce') : 'Reduce collection';
-            const expandTitle = i18n ? i18n.t('collections.expand') : 'Expand collection';
-            const deleteTitle = i18n ? i18n.t('collections.deleteTitle') : 'Delete collection';
+            const noColText = esc(tr('collections.noCollections', 'No collections yet'));
+            const emptyFolderText = esc(tr('collections.emptyFolder', '(Empty folder)'));
+            const reduceTitle = esc(tr('collections.reduce', 'Reduce collection'));
+            const expandTitle = esc(tr('collections.expand', 'Expand collection'));
+            const deleteTitle = esc(tr('collections.deleteTitle', 'Delete collection'));
+            const renameTitle = esc(tr('collections.renameTitle', 'Renomear coleção'));
 
             if (state.collections.length === 0) {
-                container.innerHTML = `
-                    <div class="px-3 py-2 text-xs text-earth/70 italic sidebar-text">
-                        ${noColText}
-                    </div>
-                `;
+                container.innerHTML = `<div class="px-3 py-2 text-xs text-earth/70 italic sidebar-text">${noColText}</div>`;
                 return;
             }
 
@@ -153,52 +176,50 @@ window.Lexicon = window.Lexicon || {};
                 const isActive = state.currentFilter.type === 'collection' && state.currentFilter.value === col.name;
                 const isExpanded = state.expandedSidebarCollections.includes(col.name);
                 const colArticles = articlesByCol[col.name] || [];
-                const safeName = window.Lexicon.Utils.escapeHTML(col.name);
+                const safeName = esc(col.name);
+                const safeId = esc(col.id);
 
                 let subArticlesHtml = '';
                 if (isExpanded) {
-                    if (colArticles.length === 0) {
-                        subArticlesHtml = `
-                            <div class="ml-5 pl-2.5 border-l border-wood/70 py-1 text-[11px] text-earth/60 italic sidebar-text">
-                                ${emptyFolderText}
-                            </div>
-                        `;
-                    } else {
-                        subArticlesHtml = `
-                            <div class="ml-5 pl-2.5 border-l border-wood/70 space-y-0.5 py-1 sidebar-text">
+                    subArticlesHtml = colArticles.length === 0
+                        ? `<div class="ml-5 pl-2.5 border-l border-wood/70 py-1 text-[11px] text-earth/60 italic sidebar-text">${emptyFolderText}</div>`
+                        : `<div class="ml-5 pl-2.5 border-l border-wood/70 space-y-0.5 py-1 sidebar-text">
                                 ${colArticles.map(a => `
-                                    <div data-action="inspect-article" data-article-id="${a.id}" 
-                                         class="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-wood/40 text-[11px] text-soil/90 cursor-pointer truncate transition-colors" 
-                                         title="${window.Lexicon.Utils.escapeHTML(a.title)}">
-                                        <i class="ph ph-file-text text-xs text-earth/70 shrink-0"></i>
-                                        <span class="truncate">${window.Lexicon.Utils.escapeHTML(a.title)}</span>
+                                    <div data-action="inspect-article" data-article-id="${Number(a.id)}" role="button" tabindex="0"
+                                         class="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-wood/40 text-[11px] text-soil/90 cursor-pointer truncate transition-colors"
+                                         title="${esc(a.title)}">
+                                        <i class="ph ph-file-text text-xs text-earth/70 shrink-0" aria-hidden="true"></i>
+                                        <span class="truncate">${esc(a.title)}</span>
                                     </div>
                                 `).join('')}
-                            </div>
-                        `;
-                    }
+                           </div>`;
                 }
 
                 return `
                     <div class="group rounded-lg transition-colors ${isActive ? 'bg-wood/40 font-medium text-soil' : 'hover:bg-wood/20'}">
-                        <div class="flex items-center justify-between px-2 py-1.5 text-earth hover:text-soil cursor-pointer" data-collection="${safeName}">
+                        <div class="flex items-center justify-between px-2 py-1.5 text-earth hover:text-soil cursor-pointer">
                             <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                                <button type="button" data-action="toggle-collection-expand" data-collection-name="${safeName}" 
-                                        class="p-1 hover:bg-wood/50 rounded text-earth/70 hover:text-soil transition-colors shrink-0 cursor-pointer" 
-                                        title="${isExpanded ? reduceTitle : expandTitle}">
-                                    <i class="ph-bold ${isExpanded ? 'ph-caret-down' : 'ph-caret-right'} text-[10px]"></i>
+                                <button type="button" data-action="toggle-collection-expand" data-collection-name="${safeName}"
+                                        class="p-1 hover:bg-wood/50 rounded text-earth/70 hover:text-soil transition-colors shrink-0 cursor-pointer"
+                                        title="${isExpanded ? reduceTitle : expandTitle}" aria-label="${isExpanded ? reduceTitle : expandTitle}" aria-expanded="${isExpanded}">
+                                    <i class="ph-bold ${isExpanded ? 'ph-caret-down' : 'ph-caret-right'} text-[10px]" aria-hidden="true"></i>
                                 </button>
-                                <div class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer" data-action="select-collection" data-collection-name="${safeName}">
-                                    <i class="ph ${isExpanded ? 'ph-folder-open text-jungle' : 'ph-folder text-leaf'} text-base shrink-0"></i>
+                                <div class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer" data-action="select-collection" data-collection-name="${safeName}" role="button" tabindex="0" ${isActive ? 'aria-current="true"' : ''}>
+                                    <i class="ph ${isExpanded ? 'ph-folder-open text-jungle' : 'ph-folder text-leaf'} text-base shrink-0" aria-hidden="true"></i>
                                     <span class="sidebar-text text-xs truncate font-medium">${safeName}</span>
                                 </div>
                             </div>
-                            <div class="flex items-center gap-1 shrink-0">
+                            <div class="flex items-center gap-0.5 shrink-0">
                                 <span class="sidebar-text text-[10px] font-semibold bg-wood/50 text-soil px-1.5 py-0.5 rounded-full">${count}</span>
-                                <button type="button" data-action="delete-collection" data-collection-id="${col.id}" data-collection-name="${safeName}" 
-                                        class="text-earth/60 hover:text-terracotta opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded ml-0.5 sidebar-text cursor-pointer" 
-                                        title="${deleteTitle}">
-                                    <i class="ph ph-trash text-xs"></i>
+                                <button type="button" data-action="rename-collection" data-collection-id="${safeId}"
+                                        class="text-earth/60 hover:text-jungle opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-0.5 rounded ml-0.5 sidebar-text cursor-pointer"
+                                        title="${renameTitle}" aria-label="${renameTitle}">
+                                    <i class="ph ph-pencil-simple text-xs" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" data-action="delete-collection" data-collection-id="${safeId}" data-collection-name="${safeName}"
+                                        class="text-earth/60 hover:text-terracotta opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-0.5 rounded sidebar-text cursor-pointer"
+                                        title="${deleteTitle}" aria-label="${deleteTitle}">
+                                    <i class="ph ph-trash text-xs" aria-hidden="true"></i>
                                 </button>
                             </div>
                         </div>
@@ -210,18 +231,13 @@ window.Lexicon = window.Lexicon || {};
 
         /**
          * Select a collection to filter by with clean filter reset
-         * @param {string} name
          */
         select(name) {
             if (window.Lexicon.Navigation) {
                 window.Lexicon.Navigation.recordNavigation();
             }
             const state = window.Lexicon.State;
-            state.currentFilter = {
-                type: 'collection',
-                value: name,
-                title: name
-            };
+            state.currentFilter = { type: 'collection', value: name, title: name };
             state.activeTag = null;
             state.searchQuery = '';
             state.semanticFilter = null;
@@ -239,113 +255,120 @@ window.Lexicon = window.Lexicon || {};
          * Populate all collection dropdowns in forms
          */
         populateSelects() {
-            const state = window.Lexicon.State;
             const uploadSelect = document.getElementById('form-collection');
             const inspectorSelect = document.getElementById('inspector-collection');
             const importDefaultSelect = document.getElementById('import-opt-default-collection');
 
-            const defaultLabel = window.Lexicon.I18n ? `(${window.Lexicon.I18n.t('folders.unfiled')})` : '(None / General)';
-            const optionsHtml = `<option value="">${defaultLabel}</option>` + 
-                state.collections.map(c => `<option value="${window.Lexicon.Utils.escapeHTML(c.name)}">${window.Lexicon.Utils.escapeHTML(c.name)}</option>`).join('');
-
-            if (uploadSelect) uploadSelect.innerHTML = optionsHtml;
-            if (inspectorSelect) inspectorSelect.innerHTML = optionsHtml;
-            if (importDefaultSelect) importDefaultSelect.innerHTML = optionsHtml;
+            [uploadSelect, inspectorSelect, importDefaultSelect].forEach(sel => {
+                if (!sel) return;
+                const current = sel.value;
+                this.fillSelect(sel, current);
+            });
         },
 
         /**
          * Get existing collection or create a new one safely
          * @param {string} name
+         * @param {{silent?: boolean}} [opts] silent: don't save/render (caller does it)
          * @returns {object|null}
          */
-        getOrCreate(name) {
-            if (!name || !name.trim()) return null;
-            const cleanName = name.trim();
+        getOrCreate(name, opts = {}) {
+            if (!name || !String(name).trim()) return null;
+            const cleanName = String(name).trim().slice(0, 120);
             const state = window.Lexicon.State;
-            let existing = state.collections.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
+            let existing = this.findByName(cleanName);
             if (!existing) {
-                existing = {
-                    id: `c_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                    name: cleanName
-                };
+                existing = { id: U().newCollectionId(), name: cleanName };
                 state.collections.push(existing);
-                window.Lexicon.Storage.save();
-                this.render();
-                this.populateSelects();
+                if (!opts.silent) {
+                    window.Lexicon.Storage.save();
+                    this.render();
+                    this.populateSelects();
+                }
             }
             return existing;
         },
 
         /**
-         * Create a new collection
+         * Create a new collection from the modal
          */
         create() {
             const input = document.getElementById('new-collection-name');
             if (!input) return;
 
             const name = input.value.trim();
-            const i18n = window.Lexicon.I18n;
-
             if (!name) {
-                const msg = i18n ? i18n.t('collections.nameRequired') : 'Please enter a collection name';
-                window.Lexicon.UI.Toast.show(msg, 'error');
+                window.Lexicon.UI.Toast.show(tr('collections.nameRequired', 'Please enter a collection name'), 'error');
+                return;
+            }
+            if (this.findByName(name)) {
+                window.Lexicon.UI.Toast.show(tr('collections.alreadyExists', 'A collection with this name already exists'), 'error');
                 return;
             }
 
+            this.getOrCreate(name);
+            window.Lexicon.UI.Modal.close('collection-modal');
+            input.value = '';
+            window.Lexicon.Articles.render();
+            window.Lexicon.UI.Toast.show(tr('collections.createdToast', 'Collection "{name}" created', { name }), 'success');
+        },
+
+        promptRename(id) {
             const state = window.Lexicon.State;
-            if (state.collections.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-                const msg = i18n ? i18n.t('collections.alreadyExists') : 'A collection with this name already exists';
-                window.Lexicon.UI.Toast.show(msg, 'error');
-                return;
+            const col = state.collections.find(c => c.id === id);
+            if (!col) return;
+            const next = window.prompt(tr('collections.renamePrompt', 'Novo nome para a coleção "{name}":', { name: col.name }), col.name);
+            if (next === null) return;
+            this.renameCollection(id, next);
+        },
+
+        /** Rename a collection and move all its documents */
+        renameCollection(id, newName) {
+            const state = window.Lexicon.State;
+            const col = state.collections.find(c => c.id === id);
+            const clean = String(newName || '').trim().slice(0, 120);
+            if (!col || !clean || clean === col.name) return false;
+            const clash = this.findByName(clean);
+            if (clash && clash.id !== id) {
+                window.Lexicon.UI.Toast.show(tr('collections.alreadyExists', 'A collection with this name already exists'), 'error');
+                return false;
             }
-
-            const newCol = {
-                id: `c_${Date.now()}`,
-                name: name
-            };
-
-            state.collections.push(newCol);
+            const oldName = col.name;
+            col.name = clean;
+            state.articles.forEach(a => { if (a.collection === oldName) a.collection = clean; });
+            const swap = (arr) => Array.isArray(arr) ? arr.map(n => n === oldName ? clean : n) : arr;
+            state.expandedSidebarCollections = swap(state.expandedSidebarCollections);
+            state.expandedFolders = swap(state.expandedFolders);
+            if (state.currentFilter.type === 'collection' && state.currentFilter.value === oldName) {
+                state.currentFilter = { type: 'collection', value: clean, title: clean };
+            }
             window.Lexicon.Storage.save();
             this.render();
             this.populateSelects();
-            window.Lexicon.UI.Modal.close('collection-modal');
-            input.value = '';
-
-            const successMsg = i18n ? i18n.t('collections.createdToast', { name }) : `Collection "${name}" created`;
-            window.Lexicon.UI.Toast.show(successMsg, 'success');
+            window.Lexicon.Articles.render();
+            window.Lexicon.UI.Toast.show(tr('collections.renamedToast', 'Coleção renomeada para "{name}"', { name: clean }), 'success');
+            return true;
         },
 
         /**
-         * Delete a collection
-         * @param {string} id
-         * @param {string} name
+         * Delete a collection (documents stay in the library, unfiled)
          */
         deleteCollection(id, name) {
-            const i18n = window.Lexicon.I18n;
-            const confirmMsg = i18n ? 
-                i18n.t('collections.confirmDelete', { name }) : 
-                `Are you sure you want to delete collection "${name}"? Articles in it will remain in your library.`;
+            const confirmMsg = tr('collections.confirmDelete',
+                'Are you sure you want to delete collection "{name}"? Articles in it will remain in your library.', { name });
 
-            if (!confirm(confirmMsg)) {
-                return;
-            }
+            if (!confirm(confirmMsg)) return;
 
             const state = window.Lexicon.State;
             state.collections = state.collections.filter(c => c.id !== id);
-
-            // Remove collection tag from articles
             state.articles.forEach(a => {
-                if (a.collection === name) {
-                    a.collection = null;
-                }
+                if (a.collection === name) a.collection = null;
             });
+            state.expandedSidebarCollections = (state.expandedSidebarCollections || []).filter(n => n !== name);
 
             if (state.currentFilter.type === 'collection' && state.currentFilter.value === name) {
-                if (window.Lexicon.Navigation) {
-                    window.Lexicon.Navigation.recordNavigation();
-                }
-                const allTitle = i18n ? i18n.t('nav.all') : 'All Documents';
-                state.currentFilter = { type: 'category', value: 'all', title: allTitle };
+                if (window.Lexicon.Navigation) window.Lexicon.Navigation.recordNavigation();
+                state.currentFilter = { type: 'category', value: 'all', title: tr('nav.all', 'All Documents') };
                 state.activeTag = null;
                 state.searchQuery = '';
                 state.semanticFilter = null;
@@ -356,9 +379,7 @@ window.Lexicon = window.Lexicon || {};
             this.render();
             this.populateSelects();
             window.Lexicon.Articles.render();
-
-            const deletedMsg = i18n ? i18n.t('collections.deletedToast', { name }) : `Collection "${name}" deleted`;
-            window.Lexicon.UI.Toast.show(deletedMsg, 'info');
+            window.Lexicon.UI.Toast.show(tr('collections.deletedToast', 'Collection "{name}" deleted', { name }), 'info');
         }
     };
 })();

@@ -5,52 +5,101 @@
 
 window.Lexicon = window.Lexicon || {};
 
-window.Lexicon.Utils = {
-    escapeHTML(str) {
-        if (str === null || str === undefined) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-};
-
 (function() {
+    const U = () => window.Lexicon.Utils;
+    const tr = (k, f, p) => U().tr(k, f, p);
+    const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+    /**
+     * Resolve "Module.method" against window.Lexicon (own properties only).
+     * Returns { fn, ctx } or null.
+     */
+    function resolveAction(path) {
+        if (!path || typeof path !== 'string') return null;
+        if (path === 'closeModal') return { fn: window.Lexicon.UI.Modal.close, ctx: window.Lexicon.UI.Modal };
+        if (path === 'openModal') return { fn: window.Lexicon.UI.Modal.open, ctx: window.Lexicon.UI.Modal };
+        const parts = path.split('.');
+        let ctx = null;
+        let cur = window.Lexicon;
+        for (const p of parts) {
+            if (FORBIDDEN_KEYS.has(p) || cur === null || cur === undefined) return null;
+            if (!Object.prototype.hasOwnProperty.call(cur, p) && !(p in cur)) return null;
+            ctx = cur;
+            cur = cur[p];
+        }
+        return typeof cur === 'function' ? { fn: cur, ctx } : null;
+    }
+
+    function buildArgs(el, event) {
+        const raw = el.getAttribute('data-lx-args');
+        if (!raw) return [];
+        let args;
+        try {
+            args = JSON.parse(raw);
+        } catch (e) {
+            console.warn('[App] invalid data-lx-args on', el, e);
+            return [];
+        }
+        if (!Array.isArray(args)) args = [args];
+        return args.map(a => {
+            if (a === '$value') return el.value;
+            if (a === '$checked') return el.checked;
+            if (a === '$event') return event;
+            if (a === '$inspectedId') return window.Lexicon.State.inspectedArticleId;
+            return a;
+        });
+    }
+
+    function runAction(el, attr, event) {
+        const path = el.getAttribute(attr);
+        const target = resolveAction(path);
+        if (!target) {
+            console.warn(`[App] unknown action "${path}"`);
+            return;
+        }
+        try {
+            const result = target.fn.apply(target.ctx, buildArgs(el, event));
+            if (result && typeof result.catch === 'function') {
+                result.catch(err => console.error(`[App] action ${path} failed:`, err));
+            }
+        } catch (err) {
+            console.error(`[App] action ${path} failed:`, err);
+        }
+    }
+
     window.Lexicon.App = {
         async init() {
-            console.log('Initializing Lexicon Intelligent Document Manager v2...');
+            if (this._initialized) return;
+            this._initialized = true;
+            console.log('Initializing Lexicon...');
 
-            // 1. Initialize UI & i18n Handlers
+            // 1. Core UI infrastructure
             window.Lexicon.UI.Modal.init();
-            if (window.Lexicon.I18n) {
-                window.Lexicon.I18n.init();
-            }
-            if (window.Lexicon.Navigation) {
-                window.Lexicon.Navigation.init();
-            }
-            if (window.Lexicon.Collections && typeof window.Lexicon.Collections.init === 'function') {
-                window.Lexicon.Collections.init();
-            }
-            if (window.Lexicon.Articles && typeof window.Lexicon.Articles.init === 'function') {
-                window.Lexicon.Articles.init();
-            }
-            if (window.Lexicon.Academic && typeof window.Lexicon.Academic.init === 'function') {
-                window.Lexicon.Academic.init();
-            }
+            this.setupActionDispatcher();
 
-            // 2. Load Persisted Catalog
+            // 2. Load persisted catalog BEFORE the first render
             await window.Lexicon.Storage.load();
 
-            // 3. Render Initial State
+            // 3. i18n (translates DOM and renders once with real data)
+            if (window.Lexicon.I18n) window.Lexicon.I18n.init();
+
+            // 4. Feature modules
+            if (window.Lexicon.Navigation) window.Lexicon.Navigation.init();
+            if (window.Lexicon.Collections) window.Lexicon.Collections.init();
+            if (window.Lexicon.Articles) window.Lexicon.Articles.init();
+            if (window.Lexicon.Academic && typeof window.Lexicon.Academic.init === 'function') window.Lexicon.Academic.init();
+            if (window.Lexicon.PDFExtractor) window.Lexicon.PDFExtractor.init();
+            if (window.Lexicon.Zettelkasten) window.Lexicon.Zettelkasten.init();
+            if (window.Lexicon.Reader) window.Lexicon.Reader.init();
+
+            // 5. Initial render
             this.applySidebarState();
             this.updateViewModeButtons();
             window.Lexicon.Collections.render();
             window.Lexicon.Collections.populateSelects();
             window.Lexicon.Articles.render();
 
-            // 4. Setup Event Listeners
+            // 6. Event listeners
             this.setupNavigation();
             this.setupSearch();
             this.setupSorting();
@@ -59,18 +108,72 @@ window.Lexicon.Utils = {
             this.setupFileUpload();
             this.setupShortcuts();
             this.setupBackupControls();
+            this.setupUnloadGuard();
 
-            // 5. Initialize AI Librarian (Ollama Agent)
+            // 7. AI Librarian (non-blocking)
             if (window.Lexicon.Librarian) {
-                window.Lexicon.Librarian.init();
+                window.Lexicon.Librarian.init().catch(err => console.warn('[App] Librarian init failed:', err));
             }
 
-            // 6. Initialize Phase 3 Modules (PDFExtractor, Zettelkasten, Reader)
-            if (window.Lexicon.PDFExtractor) window.Lexicon.PDFExtractor.init();
-            if (window.Lexicon.Zettelkasten) window.Lexicon.Zettelkasten.init();
-            if (window.Lexicon.Reader) window.Lexicon.Reader.init();
+            document.documentElement.classList.add('lexicon-ready');
+            console.log('Lexicon ready.');
+        },
 
-            console.log('Lexicon v5 with Phase 3 Ready.');
+        /**
+         * Declarative, CSP-friendly event wiring:
+         *   data-lx-click / data-lx-change / data-lx-input / data-lx-submit / data-lx-enter
+         *   data-lx-args='["arg", "$value", "$checked", "$inspectedId"]'
+         *   data-lx-stop (stop click propagation), data-lx-click-target="#selector"
+         */
+        setupActionDispatcher() {
+            if (this._dispatcherReady) return;
+            this._dispatcherReady = true;
+
+            document.addEventListener('click', (e) => {
+                const stopper = e.target.closest('[data-lx-stop]');
+                const proxy = e.target.closest('[data-lx-click-target]');
+                if (proxy) {
+                    e.preventDefault();
+                    const target = document.querySelector(proxy.getAttribute('data-lx-click-target'));
+                    if (target) target.click();
+                    return;
+                }
+                const el = e.target.closest('[data-lx-click]');
+                if (stopper && (!el || stopper.contains(el) === false)) {
+                    e.stopPropagation();
+                }
+                if (!el) return;
+                if (el.tagName === 'A' || el.getAttribute('type') === 'submit') e.preventDefault();
+                if (el.disabled) return;
+                runAction(el, 'data-lx-click', e);
+            });
+
+            document.addEventListener('change', (e) => {
+                const el = e.target.closest('[data-lx-change]');
+                if (el) runAction(el, 'data-lx-change', e);
+            });
+
+            document.addEventListener('input', (e) => {
+                const el = e.target.closest('[data-lx-input]');
+                if (el) runAction(el, 'data-lx-input', e);
+            });
+
+            document.addEventListener('submit', (e) => {
+                const form = e.target.closest('[data-lx-submit]');
+                if (form) {
+                    e.preventDefault();
+                    runAction(form, 'data-lx-submit', e);
+                }
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' || e.isComposing) return;
+                const el = e.target.closest('[data-lx-enter]');
+                if (el) {
+                    e.preventDefault();
+                    runAction(el, 'data-lx-enter', e);
+                }
+            });
         },
 
         setupNavigation() {
@@ -78,45 +181,7 @@ window.Lexicon.Utils = {
             navLinks.forEach(link => {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-
-                    if (window.Lexicon.Navigation) {
-                        window.Lexicon.Navigation.recordNavigation();
-                    }
-
-                    navLinks.forEach(l => l.classList.remove('active'));
-                    link.classList.add('active');
-
-                    const filterValue = link.dataset.filter;
-                    const localizedTitle = window.Lexicon.I18n ? window.Lexicon.I18n.t(`nav.${filterValue}`) : null;
-                    const titles = {
-                        'all': 'All Documents',
-                        'collections': 'Collections & Folders',
-                        'inbox': 'Inbox (Unsorted)',
-                        'reading': 'Reading List',
-                        'processing': 'Notes',
-                        'favorites': 'Favorite Documents',
-                        'archived': 'Archived References',
-                        'recent': 'Recently Added',
-                        'stats': 'Estatísticas & Insights'
-                    };
-
-                    const state = window.Lexicon.State;
-                    state.currentFilter = {
-                        type: 'category',
-                        value: filterValue,
-                        title: localizedTitle || titles[filterValue] || 'Documents'
-                    };
-                    state.activeTag = null;
-                    state.searchQuery = '';
-                    state.semanticFilter = null;
-                    state.selectedIds = [];
-
-                    const searchInput = document.getElementById('search-input');
-                    if (searchInput) searchInput.value = '';
-
-                    // Refresh collections UI to unselect active collection
-                    window.Lexicon.Collections.render();
-                    window.Lexicon.Articles.render();
+                    window.Lexicon.Articles.setCategoryFilter(link.dataset.filter);
                 });
             });
         },
@@ -126,25 +191,38 @@ window.Lexicon.Utils = {
             if (!searchInput) return;
 
             let debounceTimer = null;
+            let recordedForThisTyping = false;
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(debounceTimer);
                 debounceTimer = setTimeout(() => {
                     const state = window.Lexicon.State;
-                    state.searchQuery = e.target.value.trim();
-                    if (state.semanticFilter) state.semanticFilter = null;
+                    const value = e.target.value.trim();
+                    if (!recordedForThisTyping && window.Lexicon.Navigation) {
+                        window.Lexicon.Navigation.recordNavigation();
+                        recordedForThisTyping = true;
+                    }
+                    state.searchQuery = value;
+                    state.semanticFilter = null;
                     window.Lexicon.Articles.render();
-                }, 150);
+                }, 180);
             });
+            searchInput.addEventListener('blur', () => { recordedForThisTyping = false; });
 
-            // Enter key triggers AI Semantic Search through the Librarian
+            // Enter => AI semantic search (falls back to text search when the AI is offline)
             searchInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
+                if (e.key === 'Enter' && !e.isComposing) {
                     e.preventDefault();
                     clearTimeout(debounceTimer);
                     const query = searchInput.value.trim();
                     if (query && window.Lexicon.Librarian) {
                         window.Lexicon.Librarian.executeSemanticSearch(query);
                     }
+                } else if (e.key === 'Escape' && searchInput.value) {
+                    e.preventDefault();
+                    searchInput.value = '';
+                    window.Lexicon.State.searchQuery = '';
+                    window.Lexicon.State.semanticFilter = null;
+                    window.Lexicon.Articles.render();
                 }
             });
         },
@@ -152,53 +230,41 @@ window.Lexicon.Utils = {
         setupSorting() {
             const sortSelect = document.getElementById('sort-select');
             if (!sortSelect) return;
-
             sortSelect.value = window.Lexicon.State.sortBy || 'date-desc';
             sortSelect.addEventListener('change', (e) => {
-                const state = window.Lexicon.State;
-                state.sortBy = e.target.value;
+                window.Lexicon.State.sortBy = e.target.value;
                 window.Lexicon.Storage.save();
                 window.Lexicon.Articles.render();
             });
         },
 
         setupViewModes() {
-            const btnGrid = document.getElementById('btn-view-grid');
-            const btnTable = document.getElementById('btn-view-table');
-
-            if (btnGrid) {
-                btnGrid.addEventListener('click', () => {
-                    window.Lexicon.State.viewMode = 'grid';
+            const bind = (id, mode) => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+                btn.addEventListener('click', () => {
+                    window.Lexicon.State.viewMode = mode;
                     this.updateViewModeButtons();
                     window.Lexicon.Storage.save();
                     window.Lexicon.Articles.render();
                 });
-            }
-
-            if (btnTable) {
-                btnTable.addEventListener('click', () => {
-                    window.Lexicon.State.viewMode = 'table';
-                    this.updateViewModeButtons();
-                    window.Lexicon.Storage.save();
-                    window.Lexicon.Articles.render();
-                });
-            }
+            };
+            bind('btn-view-grid', 'grid');
+            bind('btn-view-table', 'table');
         },
 
         updateViewModeButtons() {
             const state = window.Lexicon.State;
             const btnGrid = document.getElementById('btn-view-grid');
             const btnTable = document.getElementById('btn-view-table');
-
-            if (btnGrid && btnTable) {
-                if (state.viewMode === 'table') {
-                    btnTable.className = 'p-1.5 rounded-md bg-wood/50 text-soil shadow-sm transition-all';
-                    btnGrid.className = 'p-1.5 rounded-md text-earth hover:text-soil transition-all';
-                } else {
-                    btnGrid.className = 'p-1.5 rounded-md bg-wood/50 text-soil shadow-sm transition-all';
-                    btnTable.className = 'p-1.5 rounded-md text-earth hover:text-soil transition-all';
-                }
-            }
+            if (!btnGrid || !btnTable) return;
+            const active = 'p-1.5 rounded-md bg-wood/50 text-soil shadow-sm transition-all';
+            const inactive = 'p-1.5 rounded-md text-earth hover:text-soil transition-all';
+            const isTable = state.viewMode === 'table';
+            btnTable.className = isTable ? active : inactive;
+            btnGrid.className = isTable ? inactive : active;
+            btnTable.setAttribute('aria-pressed', String(isTable));
+            btnGrid.setAttribute('aria-pressed', String(!isTable));
         },
 
         handleLogoClick() {
@@ -213,7 +279,6 @@ window.Lexicon.Utils = {
         setupSidebarToggle() {
             const toggleBtn = document.getElementById('toggle-sidebar');
             if (!toggleBtn) return;
-
             toggleBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const state = window.Lexicon.State;
@@ -227,111 +292,66 @@ window.Lexicon.Utils = {
             const state = window.Lexicon.State;
             const sidebar = document.getElementById('sidebar');
             if (!sidebar) return;
-
-            if (state.sidebarCollapsed) {
-                sidebar.classList.remove('w-64');
-                sidebar.classList.add('sidebar-collapsed');
-            } else {
-                sidebar.classList.remove('sidebar-collapsed');
-                sidebar.classList.add('w-64');
-            }
+            sidebar.classList.toggle('w-64', !state.sidebarCollapsed);
+            sidebar.classList.toggle('sidebar-collapsed', !!state.sidebarCollapsed);
+            const toggleBtn = document.getElementById('toggle-sidebar');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
         },
 
         setupFileUpload() {
-            // --- Single File Dropzone & Input ---
+            const Articles = window.Lexicon.Articles;
             const dropZone = document.getElementById('drop-zone');
             const fileInput = document.getElementById('file-upload');
-            const fileNameDisplay = document.getElementById('selected-file-name');
-            const titleInput = document.getElementById('form-title');
-            const yearInput = document.getElementById('form-year');
 
-            const handleSingleFile = (file) => {
-                if (!file) return;
-
-                const sizeStr = file.size > 1024 * 1024 
-                    ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` 
-                    : `${(file.size / 1024).toFixed(1)} KB`;
-
-                if (fileNameDisplay) {
-                    fileNameDisplay.textContent = `Selected: ${file.name} (${sizeStr})`;
-                }
-
-                // Auto-fill title if empty
-                if (titleInput && !titleInput.value.trim()) {
-                    titleInput.value = window.Lexicon.Articles.cleanTitle(file.name);
-                }
-
-                // Try to infer year from filename
-                if (yearInput && !yearInput.value) {
-                    yearInput.value = window.Lexicon.Articles.extractYear(file.name);
-                }
-
-                // Real PDF Text & Metadata Extraction (Item 3.2)
-                if (file.name.toLowerCase().endsWith('.pdf') && window.Lexicon.PDFExtractor) {
-                    window.Lexicon.PDFExtractor.extractFromBlob(file).then(extracted => {
-                        if (!extracted) return;
-                        if (extracted.title && (!titleInput.value.trim() || titleInput.value === window.Lexicon.Articles.cleanTitle(file.name))) {
-                            titleInput.value = extracted.title;
-                        }
-                        const authorInput = document.getElementById('form-author');
-                        if (extracted.authors && authorInput && !authorInput.value.trim()) {
-                            authorInput.value = extracted.authors;
-                        }
-                        if (extracted.year && yearInput && !yearInput.value) {
-                            yearInput.value = extracted.year;
-                        }
-                        const summaryInput = document.getElementById('form-summary');
-                        if (extracted.abstract && summaryInput && !summaryInput.value.trim()) {
-                            summaryInput.value = extracted.abstract;
-                        }
-                    }).catch(e => console.warn('[App] PDF extraction background error:', e));
-                }
+            const preventAndMark = (zone, active) => (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                zone.classList.toggle('drag-active', active);
             };
 
             if (dropZone && fileInput) {
+                dropZone.setAttribute('role', 'button');
+                dropZone.setAttribute('tabindex', '0');
                 dropZone.addEventListener('click', () => fileInput.click());
-
-                fileInput.addEventListener('change', (e) => {
-                    if (e.target.files && e.target.files.length > 0) {
-                        handleSingleFile(e.target.files[0]);
+                dropZone.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        fileInput.click();
                     }
                 });
 
-                ['dragenter', 'dragover'].forEach(event => {
-                    dropZone.addEventListener(event, (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        dropZone.classList.add('drag-active');
-                    });
+                fileInput.addEventListener('change', (e) => {
+                    Articles._pendingDroppedFile = null;
+                    if (e.target.files && e.target.files.length > 0) Articles.prefillFromFile(e.target.files[0]);
                 });
 
-                ['dragleave', 'drop'].forEach(event => {
-                    dropZone.addEventListener(event, (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        dropZone.classList.remove('drag-active');
-                    });
-                });
+                ['dragenter', 'dragover'].forEach(ev => dropZone.addEventListener(ev, preventAndMark(dropZone, true)));
+                ['dragleave', 'drop'].forEach(ev => dropZone.addEventListener(ev, preventAndMark(dropZone, false)));
 
                 dropZone.addEventListener('drop', async (e) => {
-                    if (e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-                        // Check if multiple files or folder dropped on single dropzone
-                        const firstEntry = e.dataTransfer.items[0].webkitGetAsEntry ? e.dataTransfer.items[0].webkitGetAsEntry() : null;
-                        if (e.dataTransfer.items.length > 1 || (firstEntry && firstEntry.isDirectory)) {
-                            const scanned = await window.Lexicon.Articles.scanDataTransferItems(e.dataTransfer.items);
-                            window.Lexicon.Articles.addFilesToStaging(scanned);
-                            return;
+                    const dt = e.dataTransfer;
+                    if (!dt) return;
+                    const items = dt.items ? Array.from(dt.items) : [];
+                    // Must be read synchronously inside the event handler
+                    const firstEntry = items[0] && items[0].webkitGetAsEntry ? items[0].webkitGetAsEntry() : null;
+                    if (items.length > 1 || (firstEntry && firstEntry.isDirectory)) {
+                        const scanned = await Articles.scanDataTransferItems(dt.items);
+                        Articles.addFilesToStaging(scanned);
+                        return;
+                    }
+                    if (dt.files && dt.files.length > 0) {
+                        const file = dt.files[0];
+                        try {
+                            fileInput.files = dt.files;
+                        } catch (err) {
+                            // Older browsers: keep a reference instead
                         }
-
-                        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                            fileInput.files = e.dataTransfer.files;
-                            handleSingleFile(e.dataTransfer.files[0]);
-                        }
+                        Articles._pendingDroppedFile = file;
+                        Articles.prefillFromFile(file);
                     }
                 });
             }
 
-            // --- Multi-File & Folder Import Controls ---
             const dropZoneMulti = document.getElementById('drop-zone-multi');
             const multiFileInput = document.getElementById('import-multi-files-input');
             const folderInput = document.getElementById('import-folder-input');
@@ -339,8 +359,7 @@ window.Lexicon.Utils = {
             if (multiFileInput) {
                 multiFileInput.addEventListener('change', (e) => {
                     if (e.target.files && e.target.files.length > 0) {
-                        const fileList = Array.from(e.target.files).map(f => ({ file: f, path: f.name, folder: '' }));
-                        window.Lexicon.Articles.addFilesToStaging(fileList);
+                        Articles.addFilesToStaging(Array.from(e.target.files).map(f => ({ file: f, path: f.name, folder: '' })));
                     }
                 });
             }
@@ -348,74 +367,65 @@ window.Lexicon.Utils = {
             if (folderInput) {
                 folderInput.addEventListener('change', (e) => {
                     if (e.target.files && e.target.files.length > 0) {
-                        const fileList = Array.from(e.target.files).map(f => {
+                        Articles.addFilesToStaging(Array.from(e.target.files).map(f => {
                             const relPath = f.webkitRelativePath || f.name;
                             const parts = relPath.split('/').filter(Boolean);
-                            const folder = parts.length > 1 ? parts[parts.length - 2] : '';
-                            return { file: f, path: relPath, folder: folder };
-                        });
-                        window.Lexicon.Articles.addFilesToStaging(fileList);
+                            return { file: f, path: relPath, folder: parts.length > 1 ? parts[parts.length - 2] : '' };
+                        }));
                     }
                 });
             }
 
             if (dropZoneMulti) {
-                ['dragenter', 'dragover'].forEach(event => {
-                    dropZoneMulti.addEventListener(event, (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        dropZoneMulti.classList.add('drag-active');
-                    });
-                });
-
-                ['dragleave', 'drop'].forEach(event => {
-                    dropZoneMulti.addEventListener(event, (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        dropZoneMulti.classList.remove('drag-active');
-                    });
-                });
-
+                ['dragenter', 'dragover'].forEach(ev => dropZoneMulti.addEventListener(ev, preventAndMark(dropZoneMulti, true)));
+                ['dragleave', 'drop'].forEach(ev => dropZoneMulti.addEventListener(ev, preventAndMark(dropZoneMulti, false)));
                 dropZoneMulti.addEventListener('drop', async (e) => {
-                    if (e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-                        const scanned = await window.Lexicon.Articles.scanDataTransferItems(e.dataTransfer.items);
-                        window.Lexicon.Articles.addFilesToStaging(scanned);
-                    } else if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        const fileList = Array.from(e.dataTransfer.files).map(f => ({ file: f, path: f.name, folder: '' }));
-                        window.Lexicon.Articles.addFilesToStaging(fileList);
+                    const dt = e.dataTransfer;
+                    if (dt && dt.items && dt.items.length > 0) {
+                        Articles.addFilesToStaging(await Articles.scanDataTransferItems(dt.items));
+                    } else if (dt && dt.files && dt.files.length > 0) {
+                        Articles.addFilesToStaging(Array.from(dt.files).map(f => ({ file: f, path: f.name, folder: '' })));
                     }
                 });
             }
+
+            // Reset the add form whenever the upload dialog closes
+            window.Lexicon.UI.Modal.onClose('upload-modal', () => {
+                if (!Articles._submitting && !Articles._importing) {
+                    Articles.resetAddForm();
+                    Articles.clearStagedFiles();
+                }
+            });
+
+            // Don't let a file dropped outside a drop zone navigate away from the app
+            ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, (e) => {
+                if (!e.target.closest || !e.target.closest('#drop-zone, #drop-zone-multi')) e.preventDefault();
+            }));
         },
 
         setupShortcuts() {
             document.addEventListener('keydown', (e) => {
-                const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-                const isTyping = activeTag === 'input' || activeTag === 'textarea';
+                const el = document.activeElement;
+                const tag = el ? el.tagName.toLowerCase() : '';
+                const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select' || (el && el.isContentEditable);
 
-                // Cmd/Ctrl + K => Focus Search
-                if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                // Ctrl/Cmd + K => focus search
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
                     e.preventDefault();
                     const searchInput = document.getElementById('search-input');
                     if (searchInput) {
                         searchInput.focus();
                         searchInput.select();
                     }
+                    return;
                 }
 
-                // Cmd/Ctrl + N => Add Document Modal (when not typing in form)
-                if ((e.metaKey || e.ctrlKey) && e.key === 'n' && !e.shiftKey && !isTyping) {
+                // Alt + N => add document (Ctrl+N can't be intercepted in most browsers)
+                if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'n' && !isTyping) {
                     e.preventDefault();
                     window.Lexicon.UI.Modal.open('upload-modal');
                 }
-
-                // Esc => Close active modal
-                if (e.key === 'Escape') {
-                    const openModal = document.querySelector('.modal-overlay:not(.hidden)');
-                    if (openModal) {
-                        window.Lexicon.UI.Modal.close(openModal.id);
-                    }
-                }
+                // Escape is handled centrally by Lexicon.UI.Modal
             });
         },
 
@@ -423,60 +433,84 @@ window.Lexicon.Utils = {
             const btnExport = document.getElementById('btn-export-backup');
             const fileImportInput = document.getElementById('import-file-input');
 
-            if (btnExport) {
-                btnExport.addEventListener('click', () => {
-                    window.Lexicon.Storage.exportJSON();
-                });
-            }
-
+            if (btnExport) btnExport.addEventListener('click', () => window.Lexicon.Storage.exportJSON());
             if (fileImportInput) {
-                fileImportInput.addEventListener('change', (e) => {
-                    if (e.target.files && e.target.files.length > 0) {
-                        window.Lexicon.Storage.importJSON(e.target.files[0]);
-                        fileImportInput.value = '';
-                    }
+                fileImportInput.addEventListener('change', async (e) => {
+                    const file = e.target.files && e.target.files[0];
+                    fileImportInput.value = '';
+                    if (file) await window.Lexicon.Storage.importJSON(file);
                 });
             }
         },
 
-        openSettingsModal(initialTab = 'general') {
-            if (window.Lexicon.Librarian) {
+        /** Warn before leaving while a save/import is still running */
+        setupUnloadGuard() {
+            window.addEventListener('beforeunload', (e) => {
+                const A = window.Lexicon.Articles;
+                if (A) A.flushNotesSave();
+                if (window.Lexicon.Reader && window.Lexicon.Reader.isOpen()) window.Lexicon.Reader.flushPendingSave();
+                if (A && (A._importing || A._submitting)) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                }
+            });
+        },
+
+        async openSettingsModal(initialTab = 'general') {
+            const Librarian = window.Lexicon.Librarian;
+            if (Librarian) {
                 const endpointInput = document.getElementById('librarian-endpoint-input');
-                if (endpointInput) endpointInput.value = window.Lexicon.Librarian.endpoint;
-                window.Lexicon.Librarian.populateModelSelect();
-                window.Lexicon.Librarian.updateBadgeUI();
+                if (endpointInput) endpointInput.value = Librarian.endpoint;
+                Librarian.populateModelSelect();
+                Librarian.updateBadgeUI();
             }
             this.switchSettingsTab(initialTab);
-            if (window.Lexicon.I18n) {
-                window.Lexicon.I18n.updateLanguageButtons();
-            }
+            if (window.Lexicon.I18n) window.Lexicon.I18n.updateLanguageButtons();
             window.Lexicon.UI.Modal.open('librarian-settings-modal');
+            this.updateStorageInfo();
+        },
+
+        /** Show browser storage usage / persistence in the backup tab */
+        async updateStorageInfo() {
+            const el = document.getElementById('storage-usage-info');
+            if (!el) return;
+            const Storage = window.Lexicon.Storage;
+            const est = await Storage.getStorageEstimate();
+            let persisted = false;
+            try { persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : false; } catch (e) { persisted = false; }
+            const used = est && est.usage ? U().formatBytes(est.usage) : '?';
+            const quota = est && est.quota ? U().formatBytes(est.quota) : '?';
+            el.textContent = tr('settings.storageUsage', 'Uso de armazenamento: {used} de {quota} • {persist}', {
+                used, quota,
+                persist: persisted ? tr('settings.storagePersistent', 'persistente (protegido contra limpeza automática)') : tr('settings.storageNotPersistent', 'não persistente — o navegador pode apagar os dados se faltar espaço; faça backups completos')
+            });
+        },
+
+        closeSettingsAndOpenReset() {
+            window.Lexicon.UI.Modal.close('librarian-settings-modal');
+            window.Lexicon.Storage.openResetWizard();
         },
 
         switchSettingsTab(tabName) {
             document.querySelectorAll('.settings-tab-btn').forEach(btn => {
                 const isActive = btn.dataset.tab === tabName;
-                if (isActive) {
-                    btn.classList.add('border-jungle', 'text-jungle');
-                    btn.classList.remove('border-transparent', 'text-earth');
-                } else {
-                    btn.classList.remove('border-jungle', 'text-jungle');
-                    btn.classList.add('border-transparent', 'text-earth');
-                }
+                btn.classList.toggle('border-jungle', isActive);
+                btn.classList.toggle('text-jungle', isActive);
+                btn.classList.toggle('border-transparent', !isActive);
+                btn.classList.toggle('text-earth', !isActive);
+                btn.setAttribute('aria-selected', String(isActive));
             });
-
             document.querySelectorAll('.settings-tab-panel').forEach(panel => {
-                if (panel.id === `settings-panel-${tabName}`) {
-                    panel.classList.remove('hidden');
-                } else {
-                    panel.classList.add('hidden');
-                }
+                panel.classList.toggle('hidden', panel.id !== `settings-panel-${tabName}`);
             });
         }
     };
 
-    // Auto-bootstrap on DOM ready
     document.addEventListener('DOMContentLoaded', () => {
-        window.Lexicon.App.init();
+        window.Lexicon.App.init().catch(err => {
+            console.error('Lexicon failed to start:', err);
+            const msg = document.getElementById('current-view-count');
+            if (msg) msg.textContent = `Error: ${err.message}`;
+        });
     });
 })();

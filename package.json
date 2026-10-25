@@ -1,0 +1,14 @@
+{
+  "name": "lexicon",
+  "version": "5.1.0",
+  "private": true,
+  "description": "Local-first research library manager with a local Ollama AI librarian",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i css/tailwind.input.css -o css/tailwind.css --minify",
+    "start": "python3 server.py",
+    "check": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}
