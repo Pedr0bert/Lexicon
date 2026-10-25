@@ -1,8 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://api.crossref.org https://api.openalex.org https://export.arxiv.org; frame-src 'self' blob:; worker-src 'self' blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta name="referrer" content="no-referrer">
     <title>Lexicon - Intelligent Document & Research File Manager</title>
     
     <!-- Phosphor Icons -->
@@ -10,38 +12,8 @@
     <link rel="stylesheet" href="css/phosphor-bold.css">
     <link rel="stylesheet" href="css/phosphor-fill.css">
 
-    <!-- Tailwind CSS -->
-    <script src="js/tailwind-cdn.js"></script>
-
-    <!-- Tailwind Theme Extension -->
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'sand': '#F4F1EA',
-                        'clay': '#E6DFD3',
-                        'wood': '#D1C7B7',
-                        'earth': '#4A4036',
-                        'soil': '#2D251F',
-                        'jungle': '#2D6A4F',
-                        'canopy': '#1B4332',
-                        'leaf': '#40916C',
-                        'terracotta': '#E07A5F',
-                        'paper': '#FDFBF7',
-                    },
-                    fontFamily: {
-                        'sans': ['Inter', 'system-ui', 'sans-serif'],
-                        'serif': ['Merriweather', 'Georgia', 'serif'],
-                        'mono': ['JetBrains Mono', 'monospace'],
-                    },
-                    boxShadow: {
-                        '2xs': '0 1px 2px rgba(0,0,0,0.03)',
-                    }
-                }
-            }
-        }
-    </script>
+    <!-- Tailwind CSS (static build: npm run build:css) -->
+    <link rel="stylesheet" href="css/tailwind.css">
 
     <!-- App Styles -->
     <link rel="stylesheet" href="css/styles.css">
@@ -56,17 +28,17 @@
         <div class="flex flex-col h-full overflow-hidden">
             <!-- Sidebar Header -->
             <div class="h-16 flex items-center justify-between px-4 border-b border-wood/60 shrink-0 sidebar-header relative">
-                <div id="sidebar-logo-container" class="flex items-center gap-3 overflow-hidden cursor-pointer" onclick="Lexicon.App.handleLogoClick()" title="Lexicon">
+                <div id="sidebar-logo-container" class="flex items-center gap-3 overflow-hidden cursor-pointer" data-lx-click="App.handleLogoClick" title="Lexicon">
                     <div id="sidebar-logo-icon" class="w-9 h-9 rounded-xl bg-jungle flex items-center justify-center text-white shrink-0 shadow-sm">
-                        <i class="ph ph-books text-xl"></i>
+                        <i class="ph ph-books text-xl" aria-hidden="true"></i>
                     </div>
                     <div class="sidebar-text leading-tight">
                         <h1 class="font-serif font-bold text-soil text-lg tracking-tight" data-i18n="app.name">Lexicon</h1>
                         <p class="text-[10px] text-earth uppercase font-semibold tracking-wider" data-i18n="app.subtitle">File Manager</p>
                     </div>
                 </div>
-                <button id="toggle-sidebar" class="text-earth hover:bg-wood/50 p-1.5 rounded-lg transition-colors shrink-0" title="Toggle Sidebar" data-i18n-title="nav.toggleSidebar">
-                    <i class="ph ph-sidebar-simple text-lg"></i>
+                <button id="toggle-sidebar" class="text-earth hover:bg-wood/50 p-1.5 rounded-lg transition-colors shrink-0" title="Toggle Sidebar" data-i18n-title="nav.toggleSidebar" aria-label="Toggle Sidebar">
+                    <i class="ph ph-sidebar-simple text-lg" aria-hidden="true"></i>
                 </button>
             </div>
 
@@ -77,42 +49,42 @@
                     <div class="section-title px-3 text-[11px] font-bold text-soil uppercase tracking-wider mb-2" data-i18n="nav.workflow">Workflow</div>
                     
                     <a href="#" class="nav-link active flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="all">
-                        <i class="ph ph-stack text-base shrink-0"></i>
+                        <i class="ph ph-stack text-base shrink-0" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.all">All Documents</span>
                     </a>
 
                     <a href="#" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="collections">
-                        <i class="ph ph-folders text-base shrink-0 text-jungle"></i>
+                        <i class="ph ph-folders text-base shrink-0 text-jungle" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.collections">Collections & Folders</span>
                     </a>
 
                     <a href="#" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="inbox">
-                        <i class="ph ph-tray text-base shrink-0 text-terracotta"></i>
+                        <i class="ph ph-tray text-base shrink-0 text-terracotta" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.inbox">Inbox</span>
                     </a>
 
                     <a href="#" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="reading">
-                        <i class="ph ph-book-open text-base shrink-0 text-jungle"></i>
+                        <i class="ph ph-book-open text-base shrink-0 text-jungle" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.reading">Reading List</span>
                     </a>
 
                     <a href="#" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="processing">
-                        <i class="ph ph-notepad text-base shrink-0 text-leaf"></i>
+                        <i class="ph ph-notepad text-base shrink-0 text-leaf" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.processing">Fichamento</span>
                     </a>
 
                     <a href="#" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="favorites">
-                        <i class="ph ph-star text-base shrink-0 text-terracotta"></i>
+                        <i class="ph ph-star text-base shrink-0 text-terracotta" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.favorites">Favorites</span>
                     </a>
 
                     <a href="#" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="archived">
-                        <i class="ph ph-archive text-base shrink-0"></i>
+                        <i class="ph ph-archive text-base shrink-0" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.archived">Archived</span>
                     </a>
 
                     <a href="#" class="nav-link flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 transition-colors text-xs font-medium" data-filter="stats">
-                        <i class="ph ph-chart-line-up text-base shrink-0 text-jungle"></i>
+                        <i class="ph ph-chart-line-up text-base shrink-0 text-jungle" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.stats">Estatísticas & Insights</span>
                     </a>
                 </div>
@@ -120,12 +92,12 @@
                 <!-- Research Collections / Folders -->
                 <div>
                     <div class="flex items-center justify-between px-3 mb-2">
-                        <button onclick="Lexicon.Collections.toggleSidebarSection()" class="flex items-center gap-1.5 text-[11px] font-bold text-soil uppercase tracking-wider hover:text-jungle transition-colors group cursor-pointer" title="Expand / Reduce Collections list" data-i18n-title="collections.expandList">
-                            <i id="sidebar-collections-chevron" class="ph ph-caret-down text-xs text-earth group-hover:text-jungle transition-transform"></i>
+                        <button data-lx-click="Collections.toggleSidebarSection" class="flex items-center gap-1.5 text-[11px] font-bold text-soil uppercase tracking-wider hover:text-jungle transition-colors group cursor-pointer" title="Expand / Reduce Collections list" data-i18n-title="collections.expandList" aria-label="Expand / Reduce Collections list">
+                            <i id="sidebar-collections-chevron" class="ph ph-caret-down text-xs text-earth group-hover:text-jungle transition-transform" aria-hidden="true"></i>
                             <span class="section-title" data-i18n="nav.collectionsHeader">Collections</span>
                         </button>
-                        <button onclick="window.Lexicon.Collections.openCreateModal()" class="text-earth hover:text-soil p-0.5 rounded hover:bg-wood/40 transition-colors" title="Create Collection" data-i18n-title="collections.createBtn">
-                            <i class="ph-bold ph-plus text-xs"></i>
+                        <button data-lx-click="Collections.openCreateModal" class="text-earth hover:text-soil p-0.5 rounded hover:bg-wood/40 transition-colors" title="Create Collection" data-i18n-title="collections.createBtn" aria-label="Create Collection">
+                            <i class="ph-bold ph-plus text-xs" aria-hidden="true"></i>
                         </button>
                     </div>
                     <div id="collections-list" class="space-y-0.5">
@@ -137,27 +109,32 @@
                 <div class="pt-3 border-t border-wood/40 space-y-1">
                     <div class="section-title px-3 text-[11px] font-bold text-soil uppercase tracking-wider mb-2" data-i18n="nav.backupHeader">Catalog Backup</div>
                     
-                    <button id="btn-export-backup" class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-earth hover:bg-wood/30 hover:text-soil transition-colors text-xs font-medium" title="Export Backup JSON" data-i18n-title="nav.exportBackup">
-                        <i class="ph ph-export text-sm shrink-0"></i>
+                    <button id="btn-export-backup" class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-earth hover:bg-wood/30 hover:text-soil transition-colors text-xs font-medium" title="Export Backup JSON" data-i18n-title="nav.exportBackup" aria-label="Export Backup JSON">
+                        <i class="ph ph-export text-sm shrink-0" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.exportBackup">Export Catalog (.json)</span>
                     </button>
 
                     <label for="import-file-input" class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-earth hover:bg-wood/30 hover:text-soil transition-colors text-xs font-medium cursor-pointer" title="Import Backup JSON" data-i18n-title="nav.importBackup">
-                        <i class="ph ph-import text-sm shrink-0"></i>
+                        <i class="ph ph-import text-sm shrink-0" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.importBackup">Import Catalog</span>
-                        <input type="file" id="import-file-input" accept=".json" class="hidden">
+                        <input type="file" id="import-file-input" accept=".json,.zip,application/json,application/zip" class="hidden">
                     </label>
 
-                    <button onclick="Lexicon.Storage.openResetWizard()" class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-earth/70 hover:text-terracotta hover:bg-wood/30 transition-colors text-[11px]" title="Reset Sample Library" data-i18n-title="nav.resetSample">
-                        <i class="ph ph-arrow-counter-clockwise text-xs shrink-0"></i>
+                    <button type="button" data-lx-click="Storage.exportFullBackup" class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-earth hover:bg-wood/30 hover:text-soil transition-colors text-xs font-medium" title="Backup completo com arquivos (.zip)" data-i18n-title="nav.exportFullBackup" aria-label="Backup completo com arquivos (.zip)">
+                        <i class="ph ph-file-zip text-sm shrink-0" aria-hidden="true"></i>
+                        <span class="sidebar-text" data-i18n="nav.exportFullBackup">Backup completo (.zip)</span>
+                    </button>
+
+                    <button type="button" data-lx-click="Storage.openResetWizard" class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-earth/70 hover:text-terracotta hover:bg-wood/30 transition-colors text-[11px]" title="Reset Sample Library" data-i18n-title="nav.resetSample" aria-label="Reset Sample Library">
+                        <i class="ph ph-arrow-counter-clockwise text-xs shrink-0" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.resetSample">Reset Sample Data</span>
                     </button>
                 </div>
 
                 <!-- Settings Quick Access in Sidebar -->
                 <div class="pt-3 border-t border-wood/40">
-                    <button type="button" onclick="Lexicon.App.openSettingsModal('general')" class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 hover:text-soil transition-colors text-xs font-medium cursor-pointer" title="Configurações" data-i18n-title="nav.settings">
-                        <i class="ph ph-gear text-base shrink-0"></i>
+                    <button type="button" data-lx-click="App.openSettingsModal" data-lx-args='["general"]' class="btn-sidebar-full w-full flex items-center gap-3 px-3 py-2 rounded-lg text-earth hover:bg-wood/40 hover:text-soil transition-colors text-xs font-medium cursor-pointer" title="Configurações" data-i18n-title="nav.settings" aria-label="Configurações">
+                        <i class="ph ph-gear text-base shrink-0" aria-hidden="true"></i>
                         <span class="sidebar-text" data-i18n="nav.settings">Configurações</span>
                     </button>
                 </div>
@@ -182,29 +159,29 @@
         <header class="h-16 bg-paper border-b border-wood flex items-center justify-between px-6 shrink-0 shadow-2xs z-10">
             <!-- Page History Navigation Arrows (Back / Forward) -->
             <div class="flex items-center gap-1 mr-3 shrink-0">
-                <button id="btn-nav-back" onclick="Lexicon.Navigation.back()" 
+                <button id="btn-nav-back" data-lx-click="Navigation.back" 
                         class="w-8 h-8 rounded-xl bg-sand border border-wood hover:bg-wood/40 flex items-center justify-center text-soil disabled:opacity-30 disabled:pointer-events-none transition-all shadow-2xs cursor-pointer" 
-                        title="Return to previous page (Alt + ←)" data-i18n-title="nav.btnBackTitle" disabled>
-                    <i class="ph ph-arrow-left font-bold text-sm"></i>
+                        title="Return to previous page (Alt + ←)" data-i18n-title="nav.btnBackTitle" disabled aria-label="Return to previous page (Alt + ←)">
+                    <i class="ph ph-arrow-left font-bold text-sm" aria-hidden="true"></i>
                 </button>
-                <button id="btn-nav-forward" onclick="Lexicon.Navigation.forward()" 
+                <button id="btn-nav-forward" data-lx-click="Navigation.forward" 
                         class="w-8 h-8 rounded-xl bg-sand border border-wood hover:bg-wood/40 flex items-center justify-center text-soil disabled:opacity-30 disabled:pointer-events-none transition-all shadow-2xs cursor-pointer" 
-                        title="Go forward (Alt + →)" data-i18n-title="nav.btnForwardTitle" disabled>
-                    <i class="ph ph-arrow-right font-bold text-sm"></i>
+                        title="Go forward (Alt + →)" data-i18n-title="nav.btnForwardTitle" disabled aria-label="Go forward (Alt + →)">
+                    <i class="ph ph-arrow-right font-bold text-sm" aria-hidden="true"></i>
                 </button>
             </div>
 
             <!-- Search Bar (Ctrl + K) with AI Semantic Search -->
             <div class="flex-1 max-w-lg relative flex items-center">
-                <i class="ph ph-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-earth text-base pointer-events-none"></i>
-                <input type="text" id="search-input" placeholder="Search title, notes, or ask AI (e.g. 'papers sobre modulação óptica lidos em 2024')... (Ctrl+K)" 
+                <i class="ph ph-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-earth text-base pointer-events-none" aria-hidden="true"></i>
+                <input type="search" id="search-input" aria-label="Search" data-i18n-aria="search.placeholder" placeholder="Search title, notes, or ask AI (e.g. 'papers sobre modulação óptica lidos em 2024')... (Ctrl+K)" 
                        data-i18n-placeholder="search.placeholder"
                        class="w-full pl-10 pr-20 py-2 bg-sand/80 border border-wood rounded-xl text-xs text-soil placeholder:text-earth/60 focus:bg-white focus:outline-none focus:border-jungle focus:ring-1 focus:ring-jungle transition-all font-sans">
                 <div class="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-                    <button type="button" id="btn-ai-search" onclick="Lexicon.Librarian.executeSemanticSearch()" 
+                    <button type="button" id="btn-ai-search" data-lx-click="Librarian.executeSemanticSearch" 
                             class="p-1 rounded-md text-jungle hover:bg-wood/50 transition-colors flex items-center gap-1 text-[11px] font-medium" 
-                            title="Busca Semântica com o Bibliotecário IA (Enter)" data-i18n-title="search.aiSearchTitle">
-                        <i class="ph ph-sparkle text-sm"></i>
+                            title="Busca Semântica com o Bibliotecário IA (Enter)" aria-label="Busca Semântica com o Bibliotecário IA (Enter)" data-i18n-title="search.aiSearchTitle">
+                        <i class="ph ph-sparkle text-sm" aria-hidden="true"></i>
                         <span class="hidden sm:inline">IA</span>
                     </button>
                     <kbd class="text-[10px] bg-wood/40 border border-wood text-earth px-1.5 py-0.5 rounded font-mono">⌘K</kbd>
@@ -214,19 +191,19 @@
             <!-- Top Actions -->
             <div class="flex items-center gap-2.5 ml-4">
                 <!-- AI Librarian Status & Settings Trigger -->
-                <button id="librarian-header-badge" onclick="Lexicon.App.openSettingsModal('ai')" 
+                <button id="librarian-header-badge" data-lx-click="App.openSettingsModal" data-lx-args='["ai"]' 
                         class="flex items-center gap-2 px-2.5 py-1.5 bg-sand hover:bg-wood/40 border border-wood rounded-xl text-xs text-soil transition-all shadow-2xs cursor-pointer"
-                        title="Configurar Bibliotecário IA (Ollama Local)">
+                        title="Configurar Bibliotecário IA (Ollama Local)" aria-label="Configurar Bibliotecário IA (Ollama Local)">
                     <span id="librarian-status-dot" class="w-2 h-2 rounded-full bg-terracotta shrink-0"></span>
-                    <i class="ph ph-robot text-base text-jungle"></i>
+                    <i class="ph ph-robot text-base text-jungle" aria-hidden="true"></i>
                     <span class="font-medium hidden md:inline text-[11px]" id="librarian-model-name">Ollama</span>
                 </button>
 
                 <!-- Settings Button -->
-                <button type="button" onclick="Lexicon.App.openSettingsModal('general')" 
+                <button type="button" data-lx-click="App.openSettingsModal" data-lx-args='["general"]' 
                         class="p-2 text-earth hover:text-soil hover:bg-wood/40 border border-wood rounded-xl transition-colors cursor-pointer shadow-2xs" 
-                        title="Configurações" data-i18n-title="nav.settings">
-                    <i class="ph ph-gear text-base"></i>
+                        title="Configurações" data-i18n-title="nav.settings" aria-label="Configurações">
+                    <i class="ph ph-gear text-base" aria-hidden="true"></i>
                 </button>
 
                 <!-- Sorting Filter -->
@@ -242,21 +219,21 @@
 
                 <!-- View Mode Toggle (Grid vs Table) -->
                 <div class="flex items-center border border-wood rounded-lg bg-sand/50 p-0.5">
-                    <button id="btn-view-grid" class="p-1.5 rounded-md bg-wood/50 text-soil shadow-xs transition-all" title="Grid Cards View" data-i18n-title="view.grid">
-                        <i class="ph ph-squares-four text-base"></i>
+                    <button id="btn-view-grid" class="p-1.5 rounded-md bg-wood/50 text-soil shadow-xs transition-all" title="Grid Cards View" data-i18n-title="view.grid" aria-label="Grid Cards View">
+                        <i class="ph ph-squares-four text-base" aria-hidden="true"></i>
                     </button>
-                    <button id="btn-view-table" class="p-1.5 rounded-md text-earth hover:text-soil transition-all" title="High-Density Table View" data-i18n-title="view.table">
-                        <i class="ph ph-table text-base"></i>
+                    <button id="btn-view-table" class="p-1.5 rounded-md text-earth hover:text-soil transition-all" title="High-Density Table View" data-i18n-title="view.table" aria-label="High-Density Table View">
+                        <i class="ph ph-table text-base" aria-hidden="true"></i>
                     </button>
                 </div>
 
                 <div class="w-px h-6 bg-wood/60 mx-1"></div>
 
                 <!-- Add Article Button (Ctrl + N) -->
-                <button onclick="window.Lexicon.UI.Modal.open('upload-modal')" 
+                <button data-lx-click="openModal" data-lx-args='["upload-modal"]' 
                         class="flex items-center gap-2 bg-jungle hover:bg-canopy text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer" 
-                        title="Add Document (Ctrl+N)" data-i18n-title="common.addDocument">
-                    <i class="ph-bold ph-plus text-sm"></i>
+                        title="Add Document (Alt+N)" data-i18n-title="common.addDocument" aria-label="Add Document (Alt+N)">
+                    <i class="ph-bold ph-plus text-sm" aria-hidden="true"></i>
                     <span data-i18n="common.addDocument">Add Document</span>
                 </button>
             </div>
@@ -268,14 +245,14 @@
                 <!-- View Title & Stats -->
                 <div class="flex flex-col sm:flex-row sm:items-baseline justify-between mb-6 gap-2">
                     <div class="flex items-center gap-3">
-                        <button id="page-back-button" onclick="Lexicon.Navigation.back()" 
+                        <button id="page-back-button" data-lx-click="Navigation.back" 
                                 class="hidden w-8 h-8 rounded-xl bg-paper border border-wood hover:border-leaf hover:bg-clay/50 text-soil flex items-center justify-center shadow-2xs transition-all shrink-0 cursor-pointer" 
-                                title="Return to previous page" data-i18n-title="nav.btnBackTitle">
-                            <i class="ph-bold ph-arrow-left text-sm"></i>
+                                title="Return to previous page" data-i18n-title="nav.btnBackTitle" aria-label="Return to previous page">
+                            <i class="ph-bold ph-arrow-left text-sm" aria-hidden="true"></i>
                         </button>
                         <div>
                             <h2 id="current-view-title" class="text-2xl md:text-3xl font-serif font-bold text-soil tracking-tight" data-i18n="nav.all">All Documents</h2>
-                            <p id="current-view-count" class="text-xs md:text-sm text-earth mt-1 font-medium">Loading...</p>
+                            <p id="current-view-count" class="text-xs md:text-sm text-earth mt-1 font-medium" aria-live="polite" data-i18n="common.loading">Carregando...</p>
                         </div>
                     </div>
                     <div id="active-filter-banner" class="hidden"></div>
@@ -284,11 +261,11 @@
                 <!-- Empty State -->
                 <div id="empty-state" class="hidden flex-col items-center justify-center py-20 text-center">
                     <div class="w-16 h-16 rounded-full bg-clay border border-wood flex items-center justify-center text-earth mb-4">
-                        <i class="ph ph-magnifying-glass text-3xl"></i>
+                        <i class="ph ph-magnifying-glass text-3xl" aria-hidden="true"></i>
                     </div>
                     <h3 class="text-base font-serif font-bold text-soil mb-1" data-i18n="emptyState.title">No documents found</h3>
                     <p class="text-xs text-earth max-w-sm mb-6" data-i18n="emptyState.description">No papers, books, or articles match your current filter or search criteria.</p>
-                    <button onclick="window.Lexicon.UI.Modal.open('upload-modal')" class="px-4 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors" data-i18n="emptyState.action">
+                    <button data-lx-click="openModal" data-lx-args='["upload-modal"]' class="px-4 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors" data-i18n="emptyState.action">
                         Add New Document
                     </button>
                 </div>
@@ -304,14 +281,14 @@
     <!-- ==================================================================== -->
     <!-- MODAL: DOCUMENT OVERVIEW, SUMMARY, METADATA & READ INSPECTOR        -->
     <!-- ==================================================================== -->
-    <div id="inspector-modal" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4 sm:p-6">
+    <div id="inspector-modal" aria-hidden="true" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4 sm:p-6">
         <div class="bg-paper rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden transform scale-95 opacity-0 modal-content flex flex-col max-h-[90vh]" id="inspector-modal-content">
             
             <!-- Modal Header with Prominent "READ" Button -->
             <div class="px-6 py-4 border-b border-wood flex items-center justify-between bg-clay shrink-0">
                 <div class="flex items-center gap-3 min-w-0 pr-4">
                     <div class="w-10 h-10 rounded-xl bg-sand border border-wood flex items-center justify-center shrink-0">
-                        <i id="inspector-file-icon" class="ph ph-file-pdf text-2xl text-terracotta"></i>
+                        <i id="inspector-file-icon" class="ph ph-file-pdf text-2xl text-terracotta" aria-hidden="true"></i>
                     </div>
                     <div class="min-w-0">
                         <span class="text-[10px] font-bold uppercase tracking-wider text-earth/80" data-i18n="inspector.modalTitle">Document Overview</span>
@@ -323,80 +300,80 @@
                 <div class="flex items-center gap-2 sm:gap-3 shrink-0">
                     <!-- Cite / Reference Dropdown Menu -->
                     <div class="relative inline-block text-left" id="inspector-cite-menu-container">
-                        <button type="button" id="btn-inspector-cite" onclick="Lexicon.Academic.toggleCiteMenu(event)" 
+                        <button type="button" id="btn-inspector-cite" data-lx-click="Academic.toggleCiteMenu" data-lx-args='["$event"]' 
                                 class="px-3 py-1.5 bg-sand hover:bg-wood/50 border border-wood text-soil rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs" 
-                                title="Copiar referência formatada ou exportar citação" data-i18n-title="inspector.citeTooltip">
-                            <i class="ph ph-quotes text-base text-jungle"></i>
+                                title="Copiar referência formatada ou exportar citação" data-i18n-title="inspector.citeTooltip" aria-label="Copiar referência formatada ou exportar citação">
+                            <i class="ph ph-quotes text-base text-jungle" aria-hidden="true"></i>
                             <span data-i18n="inspector.cite">Citar</span>
-                            <i class="ph ph-caret-down text-xs text-earth"></i>
+                            <i class="ph ph-caret-down text-xs text-earth" aria-hidden="true"></i>
                         </button>
                         
                         <!-- Dropdown Menu -->
                         <div id="inspector-cite-dropdown" class="hidden absolute right-0 mt-2 w-64 bg-paper rounded-xl shadow-2xl border border-wood/80 py-1.5 z-50 text-xs text-soil">
                             <div class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-earth/80 border-b border-wood/50 flex items-center justify-between">
                                 <span data-i18n="inspector.copyReference">Copiar Referência</span>
-                                <span class="text-[9px] text-earth/60 font-mono">1-clique</span>
+                                <span class="text-[9px] text-earth/60 font-mono" data-i18n="inspector.oneClick">1-clique</span>
                             </div>
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('abnt')" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["abnt"]' class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
                                 <span class="font-medium">ABNT NBR 6023</span>
-                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy"></i></span>
+                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy" aria-hidden="true"></i></span>
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('apa')" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["apa"]' class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
                                 <span class="font-medium">APA (7ª edição)</span>
-                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy"></i></span>
+                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy" aria-hidden="true"></i></span>
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('chicago')" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["chicago"]' class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
                                 <span class="font-medium">Chicago (17ª ed.)</span>
-                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy"></i></span>
+                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy" aria-hidden="true"></i></span>
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('vancouver')" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["vancouver"]' class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
                                 <span class="font-medium">Vancouver</span>
-                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy"></i></span>
+                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy" aria-hidden="true"></i></span>
                             </button>
 
                             <div class="border-t border-wood/50 my-1"></div>
                             <div class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-earth/80 border-b border-wood/50 flex items-center justify-between">
                                 <span data-i18n="inspector.exportFormat">Formatos de Intercâmbio</span>
                             </div>
-                            <button type="button" onclick="Lexicon.Academic.copyBibTeXForInspected()" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
-                                <span class="font-mono text-[11px] font-semibold text-jungle">Copiar BibTeX</span>
-                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy"></i></span>
+                            <button type="button" data-lx-click="Academic.copyBibTeXForInspected" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
+                                <span class="font-mono text-[11px] font-semibold text-jungle" data-i18n="inspector.copyBibtex">Copiar BibTeX</span>
+                                <span class="text-[10px] text-earth group-hover:text-jungle flex items-center gap-1">Copiar <i class="ph ph-copy" aria-hidden="true"></i></span>
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.downloadBibTeXForInspected()" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
-                                <span class="font-medium">Baixar BibTeX (.bib)</span>
-                                <i class="ph ph-download-simple text-earth group-hover:text-jungle text-sm"></i>
+                            <button type="button" data-lx-click="Academic.downloadBibTeXForInspected" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
+                                <span class="font-medium" data-i18n="inspector.downloadBibtex">Baixar BibTeX (.bib)</span>
+                                <i class="ph ph-download-simple text-earth group-hover:text-jungle text-sm" aria-hidden="true"></i>
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.downloadRISForInspected()" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
-                                <span class="font-medium">Baixar RIS (.ris - Zotero)</span>
-                                <i class="ph ph-download-simple text-earth group-hover:text-jungle text-sm"></i>
+                            <button type="button" data-lx-click="Academic.downloadRISForInspected" class="w-full text-left px-3 py-2 hover:bg-sand flex items-center justify-between group transition-colors cursor-pointer">
+                                <span class="font-medium" data-i18n="inspector.downloadRis">Baixar RIS (.ris - Zotero)</span>
+                                <i class="ph ph-download-simple text-earth group-hover:text-jungle text-sm" aria-hidden="true"></i>
                             </button>
                         </div>
                     </div>
 
                     <!-- Favorite Star Toggle -->
-                    <button id="inspector-star-btn" onclick="Lexicon.Articles.toggleFavorite(Lexicon.State.inspectedArticleId)" 
+                    <button id="inspector-star-btn" data-lx-click="Articles.toggleFavorite" data-lx-args='["$inspectedId"]' 
                             class="p-2 rounded-xl text-earth hover:text-soil transition-colors cursor-pointer" 
-                            title="Toggle Favorite" data-i18n-title="inspector.favoriteTooltip">
-                        <i class="ph ph-star text-xl"></i>
+                            title="Toggle Favorite" data-i18n-title="inspector.favoriteTooltip" aria-label="Toggle Favorite">
+                        <i class="ph ph-star text-xl" aria-hidden="true"></i>
                     </button>
 
                     <!-- Split-View Reader Button (Phase 3) -->
-                    <button type="button" onclick="Lexicon.Reader.open(Lexicon.State.inspectedArticleId)" 
+                    <button type="button" data-lx-click="Reader.open" data-lx-args='["$inspectedId"]' 
                             class="px-3 py-1.5 bg-jungle/10 hover:bg-jungle/20 border border-jungle/30 text-canopy rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs" 
-                            title="Abrir no leitor integrado lado a lado (Split-View)">
-                        <i class="ph ph-columns text-base text-jungle"></i>
+                            title="Abrir no leitor integrado lado a lado (Split-View)" data-i18n-title="inspector.splitViewTitle" aria-label="Abrir no leitor integrado lado a lado (Split-View)">
+                        <i class="ph ph-columns text-base text-jungle" aria-hidden="true"></i>
                         <span class="hidden sm:inline" data-i18n="inspector.splitView">Split-View</span>
                     </button>
 
                     <!-- Prominent READ Button -->
-                    <button onclick="Lexicon.Articles.openDocumentForReading()" class="btn-read" title="Abrir no leitor Split-View" data-i18n-title="inspector.readTooltip">
-                        <i class="ph ph-book-open text-base"></i>
+                    <button data-lx-click="Articles.openDocumentForReading" class="btn-read" title="Abrir no leitor Split-View" data-i18n-title="inspector.readTooltip" aria-label="Abrir no leitor Split-View">
+                        <i class="ph ph-book-open text-base" aria-hidden="true"></i>
                         <span data-i18n="common.read">READ</span>
                     </button>
 
                     <!-- Close Button -->
-                    <button onclick="closeModal('inspector-modal')" class="text-earth hover:text-soil transition-colors p-2 rounded-xl hover:bg-wood/40 cursor-pointer" title="Close (Esc)" data-i18n-title="common.close">
-                        <i class="ph ph-x text-xl"></i>
+                    <button data-lx-click="closeModal" data-lx-args='["inspector-modal"]' class="text-earth hover:text-soil transition-colors p-2 rounded-xl hover:bg-wood/40 cursor-pointer" title="Close (Esc)" data-i18n-title="common.close" aria-label="Close (Esc)">
+                        <i class="ph ph-x text-xl" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
@@ -408,15 +385,15 @@
                 <div class="bg-sand/70 border border-wood rounded-xl p-4">
                     <div class="flex items-center justify-between mb-2">
                         <label class="text-xs font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                            <i class="ph ph-text-align-left text-jungle text-base"></i>
+                            <i class="ph ph-text-align-left text-jungle text-base" aria-hidden="true"></i>
                             <span data-i18n="inspector.summaryTab">Summary & Abstract</span>
                         </label>
                         <div class="flex items-center gap-2">
                             <!-- Task 1: Auto-Preenchimento e Resumo Inteligente -->
-                            <button type="button" id="btn-ai-summarize" onclick="Lexicon.Librarian.summarizeCurrentDocument()" 
+                            <button type="button" id="btn-ai-summarize" data-lx-click="Librarian.summarizeCurrentDocument" 
                                     class="px-2.5 py-1 bg-jungle/10 hover:bg-jungle/20 text-canopy border border-jungle/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" 
-                                    title="Gerar resumo executivo acadêmico (2 a 3 frases) com o Bibliotecário IA">
-                                <i class="ph ph-sparkle text-jungle text-xs"></i>
+                                    title="Gerar resumo executivo acadêmico (2 a 3 frases) com o Bibliotecário IA" data-i18n-title="inspector.aiSummarizeTitle" aria-label="Gerar resumo executivo acadêmico (2 a 3 frases) com o Bibliotecário IA">
+                                <i class="ph ph-sparkle text-jungle text-xs" aria-hidden="true"></i>
                                 <span data-i18n="inspector.aiSummarize">Resumir com IA</span>
                             </button>
                         </div>
@@ -431,7 +408,7 @@
                 <div class="bg-clay/40 border border-wood rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div class="min-w-0 flex items-center gap-3">
                         <div class="w-8 h-8 rounded-lg bg-wood/50 flex items-center justify-center text-soil shrink-0">
-                            <i class="ph ph-hard-drive text-lg"></i>
+                            <i class="ph ph-hard-drive text-lg" aria-hidden="true"></i>
                         </div>
                         <div class="min-w-0">
                             <div class="text-xs font-semibold text-soil flex items-center gap-2">
@@ -443,9 +420,9 @@
                             </div>
                         </div>
                     </div>
-                    <button type="button" onclick="Lexicon.Articles.relinkFileForInspected()" 
+                    <button type="button" data-lx-click="Articles.relinkFileForInspected" 
                             class="shrink-0 px-3 py-1.5 bg-sand hover:bg-wood/50 border border-wood rounded-lg text-xs font-semibold text-soil transition-colors flex items-center gap-1.5">
-                        <i class="ph ph-link"></i>
+                        <i class="ph ph-link" aria-hidden="true"></i>
                         <span data-i18n="inspector.relink">Re-link / Attach File</span>
                     </button>
                 </div>
@@ -453,7 +430,7 @@
                 <!-- 3. Bibliographic Details & Metadata -->
                 <div class="space-y-4">
                     <div class="text-xs font-bold text-soil uppercase tracking-wider flex items-center gap-1.5 border-b border-wood/60 pb-1.5">
-                        <i class="ph ph-info text-leaf text-base"></i>
+                        <i class="ph ph-info text-leaf text-base" aria-hidden="true"></i>
                         <span data-i18n="inspector.metadataTitle">Document Information</span>
                     </div>
 
@@ -481,16 +458,16 @@
                         <div>
                             <div class="flex items-center justify-between mb-1">
                                 <label class="block text-xs font-semibold text-earth" data-i18n="inspector.fieldDoi">DOI / Reference URL</label>
-                                <a id="inspector-doi-link" href="#" target="_blank" class="hidden text-xs text-jungle hover:underline font-medium flex items-center gap-1">
-                                    <span>Open Link</span> <i class="ph ph-arrow-square-out text-xs"></i>
+                                <a id="inspector-doi-link" target="_blank" rel="noopener noreferrer" class="hidden text-xs text-jungle hover:underline font-medium flex items-center gap-1">
+                                    <span data-i18n="inspector.openLink">Abrir link</span> <i class="ph ph-arrow-square-out text-xs" aria-hidden="true"></i>
                                 </a>
                             </div>
                             <div class="flex gap-1.5">
                                 <input type="text" id="inspector-doi" placeholder="e.g. 10.1016/... or arXiv:2301.12345" class="flex-1 min-w-0 px-3 py-2 bg-white border border-wood rounded-xl text-sm font-mono text-soil outline-none focus:border-jungle">
-                                <button type="button" id="btn-inspector-fetch-doi" onclick="Lexicon.Academic.fetchInspectorMetadata()" 
+                                <button type="button" id="btn-inspector-fetch-doi" data-lx-click="Academic.fetchInspectorMetadata" 
                                         class="px-2.5 py-2 bg-jungle/10 hover:bg-jungle/20 text-canopy border border-jungle/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0" 
-                                        title="Buscar metadados automaticamente via CrossRef ou arXiv" data-i18n-title="inspector.fetchMetadataTitle">
-                                    <i class="ph ph-cloud-arrow-down text-base text-jungle" id="icon-inspector-fetch-doi"></i>
+                                        title="Buscar metadados automaticamente via CrossRef ou arXiv" data-i18n-title="inspector.fetchMetadataTitle" aria-label="Buscar metadados automaticamente via CrossRef ou arXiv">
+                                    <i class="ph ph-cloud-arrow-down text-base text-jungle" id="icon-inspector-fetch-doi" aria-hidden="true"></i>
                                     <span id="text-inspector-fetch-doi" data-i18n="inspector.fetchMetadata">Buscar Metadados</span>
                                 </button>
                             </div>
@@ -520,10 +497,10 @@
                         <div class="flex items-center justify-between mb-1.5">
                             <label class="block text-xs font-semibold text-earth" data-i18n="inspector.fieldTags">Tags</label>
                             <!-- Task 2: Auto-Tagging e Sugestão de Coleção -->
-                            <button type="button" id="btn-ai-tag-collection" onclick="Lexicon.Librarian.suggestTagsAndCollectionCurrentDocument()" 
+                            <button type="button" id="btn-ai-tag-collection" data-lx-click="Librarian.suggestTagsAndCollectionCurrentDocument" 
                                     class="px-2.5 py-1 bg-jungle/10 hover:bg-jungle/20 text-canopy border border-jungle/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" 
-                                    title="Sugerir tags acadêmicas e coleção ideal com o Bibliotecário IA">
-                                <i class="ph ph-sparkle text-jungle text-xs"></i>
+                                    title="Sugerir tags acadêmicas e coleção ideal com o Bibliotecário IA" data-i18n-title="inspector.aiClassifyTitle" aria-label="Sugerir tags acadêmicas e coleção ideal com o Bibliotecário IA">
+                                <i class="ph ph-sparkle text-jungle text-xs" aria-hidden="true"></i>
                                 <span data-i18n="inspector.aiClassify">Auto-Tags & Coleção</span>
                             </button>
                         </div>
@@ -533,9 +510,9 @@
                         <div class="flex gap-2">
                             <input type="text" id="inspector-new-tag" placeholder="Add tag..." 
                                    data-i18n-placeholder="inspector.tagPlaceholder"
-                                   onkeydown="if(event.key==='Enter'){event.preventDefault(); Lexicon.Articles.addTagToInspected();}"
+                                   data-lx-enter="Articles.addTagToInspected"
                                    class="flex-1 px-3 py-1.5 bg-white border border-wood rounded-lg text-xs text-soil outline-none focus:border-jungle">
-                            <button type="button" onclick="Lexicon.Articles.addTagToInspected()" class="px-3 py-1.5 bg-wood/50 hover:bg-wood text-soil rounded-lg text-xs font-semibold transition-colors" data-i18n="common.add">
+                            <button type="button" data-lx-click="Articles.addTagToInspected" class="px-3 py-1.5 bg-wood/50 hover:bg-wood text-soil rounded-lg text-xs font-semibold transition-colors" data-i18n="common.add">
                                 Add Tag
                             </button>
                         </div>
@@ -545,39 +522,39 @@
                     <div class="bg-sand/60 border border-wood rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
                             <label class="text-[11px] font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                                <i class="ph ph-quotes text-jungle text-sm"></i>
+                                <i class="ph ph-quotes text-jungle text-sm" aria-hidden="true"></i>
                                 <span data-i18n="inspector.quickCitation">Citações & Referência Rápida</span>
                             </label>
                             <span class="text-[10px] text-earth/70" data-i18n="inspector.oneClickCopy">Clique para copiar</span>
                         </div>
                         <div class="flex flex-wrap gap-1.5">
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('abnt')" 
-                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação ABNT NBR 6023">
-                                <i class="ph ph-copy text-[11px] text-jungle"></i> ABNT
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["abnt"]' 
+                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação ABNT NBR 6023" aria-label="Copiar citação ABNT NBR 6023">
+                                <i class="ph ph-copy text-[11px] text-jungle" aria-hidden="true"></i> ABNT
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('apa')" 
-                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação APA 7ª ed.">
-                                <i class="ph ph-copy text-[11px] text-jungle"></i> APA 7
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["apa"]' 
+                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação APA 7ª ed." aria-label="Copiar citação APA 7ª ed.">
+                                <i class="ph ph-copy text-[11px] text-jungle" aria-hidden="true"></i> APA 7
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('chicago')" 
-                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação Chicago 17ª ed.">
-                                <i class="ph ph-copy text-[11px] text-jungle"></i> Chicago
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["chicago"]' 
+                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação Chicago 17ª ed." aria-label="Copiar citação Chicago 17ª ed.">
+                                <i class="ph ph-copy text-[11px] text-jungle" aria-hidden="true"></i> Chicago
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.copyCitationForInspected('vancouver')" 
-                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação Vancouver">
-                                <i class="ph ph-copy text-[11px] text-jungle"></i> Vancouver
+                            <button type="button" data-lx-click="Academic.copyCitationForInspected" data-lx-args='["vancouver"]' 
+                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar citação Vancouver" aria-label="Copiar citação Vancouver">
+                                <i class="ph ph-copy text-[11px] text-jungle" aria-hidden="true"></i> Vancouver
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.copyBibTeXForInspected()" 
-                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold font-mono flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar código BibTeX">
-                                <i class="ph ph-copy text-[11px] text-jungle"></i> BibTeX
+                            <button type="button" data-lx-click="Academic.copyBibTeXForInspected" 
+                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold font-mono flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Copiar código BibTeX" aria-label="Copiar código BibTeX">
+                                <i class="ph ph-copy text-[11px] text-jungle" aria-hidden="true"></i> BibTeX
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.downloadBibTeXForInspected()" 
-                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Baixar arquivo .bib">
-                                <i class="ph ph-download-simple text-[11px] text-earth"></i> .bib
+                            <button type="button" data-lx-click="Academic.downloadBibTeXForInspected" 
+                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Baixar arquivo .bib" aria-label="Baixar arquivo .bib">
+                                <i class="ph ph-download-simple text-[11px] text-earth" aria-hidden="true"></i> .bib
                             </button>
-                            <button type="button" onclick="Lexicon.Academic.downloadRISForInspected()" 
-                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Baixar arquivo .ris para Zotero/Mendeley">
-                                <i class="ph ph-download-simple text-[11px] text-earth"></i> .ris
+                            <button type="button" data-lx-click="Academic.downloadRISForInspected" 
+                                    class="px-2.5 py-1 bg-white hover:bg-clay border border-wood text-soil rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-xs" title="Baixar arquivo .ris para Zotero/Mendeley" aria-label="Baixar arquivo .ris para Zotero/Mendeley">
+                                <i class="ph ph-download-simple text-[11px] text-earth" aria-hidden="true"></i> .ris
                             </button>
                         </div>
                     </div>
@@ -587,47 +564,47 @@
                 <div class="space-y-2">
                     <div class="flex items-center justify-between border-b border-wood/60 pb-1.5">
                         <label class="text-xs font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                            <i class="ph ph-notebook text-terracotta text-base"></i>
+                            <i class="ph ph-notebook text-terracotta text-base" aria-hidden="true"></i>
                             <span data-i18n="inspector.notesTitle">Fichamento</span>
                         </label>
                         <div class="flex items-center gap-3">
-                            <span id="notes-save-indicator" class="text-[10px] text-earth/60 italic">Auto-saved</span>
-                            <button type="button" onclick="Lexicon.Academic.exportConsolidatedMarkdown()" class="text-xs text-jungle hover:underline font-semibold flex items-center gap-1 cursor-pointer" title="Exportar Fichamento estruturado completo com metadados e referências">
-                                <i class="ph ph-download-simple"></i> <span data-i18n="inspector.exportConsolidated">Exportar Fichamento (.md)</span>
+                            <span id="notes-save-indicator" class="text-[10px] text-earth/60 italic" aria-live="polite" data-i18n="inspector.autoSaved">Salvo automaticamente</span>
+                            <button type="button" data-lx-click="Academic.exportConsolidatedMarkdown" class="text-xs text-jungle hover:underline font-semibold flex items-center gap-1 cursor-pointer" title="Exportar Fichamento estruturado completo com metadados e referências" data-i18n-title="reader.exportTitle" aria-label="Exportar Fichamento estruturado completo com metadados e referências">
+                                <i class="ph ph-download-simple" aria-hidden="true"></i> <span data-i18n="inspector.exportConsolidated">Exportar Fichamento (.md)</span>
                             </button>
                         </div>
                     </div>
 
                     <!-- Notes Toolbar with Task 3: Markdown Assistant & Quick Citation -->
                     <div class="flex items-center gap-1 py-1 px-2 bg-sand/80 border border-wood rounded-lg text-earth text-xs">
-                        <button type="button" onclick="Lexicon.Articles.insertNotesFormatting('bold')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Bold">B</button>
-                        <button type="button" onclick="Lexicon.Articles.insertNotesFormatting('italic')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil italic" title="Italic">I</button>
-                        <button type="button" onclick="Lexicon.Articles.insertNotesFormatting('h2')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Header">H2</button>
-                        <button type="button" onclick="Lexicon.Articles.insertNotesFormatting('quote')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Quote"><i class="ph ph-quotes"></i></button>
-                        <button type="button" onclick="Lexicon.Articles.insertNotesFormatting('bullet')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Bullet List"><i class="ph ph-list-bullets"></i></button>
-                        <button type="button" onclick="Lexicon.Articles.insertNotesFormatting('date')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil text-[11px]" title="Insert Timestamp"><i class="ph ph-calendar"></i> Date</button>
+                        <button type="button" data-lx-click="Articles.insertNotesFormatting" data-lx-args='["bold"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Bold" data-i18n-title="format.boldTitle" aria-label="Bold">B</button>
+                        <button type="button" data-lx-click="Articles.insertNotesFormatting" data-lx-args='["italic"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil italic" title="Italic" data-i18n-title="format.italicTitle" aria-label="Italic">I</button>
+                        <button type="button" data-lx-click="Articles.insertNotesFormatting" data-lx-args='["h2"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Header" data-i18n-title="format.headingTitle" aria-label="Header">H2</button>
+                        <button type="button" data-lx-click="Articles.insertNotesFormatting" data-lx-args='["quote"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Quote" data-i18n-title="format.quoteTitle" aria-label="Quote"><i class="ph ph-quotes" aria-hidden="true"></i></button>
+                        <button type="button" data-lx-click="Articles.insertNotesFormatting" data-lx-args='["bullet"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Bullet List" data-i18n-title="format.bulletTitle" aria-label="Bullet List"><i class="ph ph-list-bullets" aria-hidden="true"></i></button>
+                        <button type="button" data-lx-click="Articles.insertNotesFormatting" data-lx-args='["date"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil text-[11px]" title="Insert Timestamp" data-i18n-title="format.dateTitle" aria-label="Insert Timestamp"><i class="ph ph-calendar" aria-hidden="true"></i> <span data-i18n="format.date">Data</span></button>
                         
                         <div class="w-px h-4 bg-wood/60 mx-1"></div>
 
                         <!-- Quick Citation (Item 3.5) -->
-                        <button type="button" onclick="Lexicon.Articles.insertQuickCitation()" 
+                        <button type="button" data-lx-click="Articles.insertQuickCitation" 
                                 class="px-2 py-0.5 rounded bg-wood/40 hover:bg-wood/70 text-soil font-medium flex items-center gap-1 text-[11px] cursor-pointer" 
-                                title="Inserir citação formatada (> trecho com página e data)">
-                            <i class="ph ph-quotes text-jungle text-xs"></i>
+                                title="Inserir citação formatada (> trecho com página e data)" data-i18n-title="inspector.quickCiteTitle">
+                            <i class="ph ph-quotes text-jungle text-xs" aria-hidden="true"></i>
                             <span data-i18n="inspector.quickCite">Citação</span>
                         </button>
 
                         <!-- Task 3: Síntese de Fichamento (Markdown Assistant) -->
-                        <button type="button" id="btn-ai-structure-notes" onclick="Lexicon.Librarian.structureCurrentNotes()" 
+                        <button type="button" id="btn-ai-structure-notes" data-lx-click="Librarian.structureCurrentNotes" 
                                 class="px-2.5 py-0.5 rounded bg-jungle/15 hover:bg-jungle/25 text-canopy font-semibold flex items-center gap-1 text-[11px] border border-jungle/30 transition-colors ml-auto cursor-pointer" 
-                                title="Estruturar notas no padrão Markdown acadêmico (Citações, tópicos-chave e conclusões)">
-                            <i class="ph ph-sparkle text-xs text-jungle"></i>
+                                title="Estruturar notas no padrão Markdown acadêmico (Citações, tópicos-chave e conclusões)" data-i18n-title="reader.structureTitle" aria-label="Estruturar notas no padrão Markdown acadêmico (Citações, tópicos-chave e conclusões)">
+                            <i class="ph ph-sparkle text-xs text-jungle" aria-hidden="true"></i>
                             <span data-i18n="inspector.aiStructure">Estruturar Notas</span>
                         </button>
                     </div>
 
                     <textarea id="inspector-notes" rows="6" 
-                              oninput="Lexicon.Articles.autoSaveNotes()" 
+                              data-lx-input="Articles.autoSaveNotes" 
                               data-i18n-placeholder="inspector.notesPlaceholder"
                               placeholder="Write notes, quotes, citations, and synthesis for this document... Digite [[ para conectar outro artigo..." 
                               class="w-full p-3 bg-white border border-wood rounded-xl text-sm text-soil outline-none focus:border-jungle focus:ring-1 focus:ring-jungle resize-y font-sans leading-relaxed"></textarea>
@@ -636,7 +613,7 @@
                     <div class="space-y-2 pt-2 border-t border-wood/50">
                         <div class="flex items-center justify-between">
                             <label class="text-xs font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                                <i class="ph ph-graph text-jungle text-base"></i>
+                                <i class="ph ph-graph text-jungle text-base" aria-hidden="true"></i>
                                 <span data-i18n="zettelkasten.backlinksTitle">Citações Reversas (Backlinks)</span>
                             </label>
                             <span class="text-[10px] text-earth/70 font-mono">[[Wikilinks]]</span>
@@ -650,12 +627,12 @@
 
             <!-- Modal Footer -->
             <div class="px-6 py-4 bg-clay border-t border-wood flex justify-between items-center shrink-0">
-                <button type="button" onclick="Lexicon.Articles.deleteInspected()" class="text-xs text-terracotta hover:underline font-semibold flex items-center gap-1" data-i18n="inspector.deleteDoc">
-                    <i class="ph ph-trash text-sm"></i> Delete from Library
+                <button type="button" data-lx-click="Articles.deleteInspected" class="text-xs text-terracotta hover:underline font-semibold flex items-center gap-1" data-i18n="inspector.deleteDoc">
+                    <i class="ph ph-trash text-sm" aria-hidden="true"></i> Delete from Library
                 </button>
                 <div class="flex gap-2">
-                    <button type="button" onclick="closeModal('inspector-modal')" class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.close">Close</button>
-                    <button type="button" onclick="Lexicon.Articles.saveInspected()" class="px-5 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="common.saveChanges">Save Changes</button>
+                    <button type="button" data-lx-click="Articles.cancelInspector" class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.close">Close</button>
+                    <button type="button" data-lx-click="Articles.saveInspected" class="px-5 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="common.saveChanges">Save Changes</button>
                 </div>
             </div>
         </div>
@@ -664,7 +641,7 @@
     <!-- ==================================================================== -->
     <!-- MODAL: INTEGRATED SPLIT-VIEW READER & EPUB VIEWER (FASE 3)          -->
     <!-- ==================================================================== -->
-    <div id="reader-split-modal" class="fixed inset-0 modal-overlay z-50 bg-sand flex flex-col md:flex-row hidden opacity-0 transition-opacity duration-200 overflow-hidden">
+    <div id="reader-split-modal" aria-hidden="true" data-no-backdrop-close="true" class="fixed inset-0 modal-overlay z-50 bg-sand flex flex-col md:flex-row hidden opacity-0 transition-opacity duration-200 overflow-hidden">
         
         <!-- Left Pane: Native PDF iframe / ePub.js Container (Flush to Top: 0, 100% Height) -->
         <div class="w-full md:w-[60%] h-1/2 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-wood bg-paper relative">
@@ -672,37 +649,37 @@
             <!-- EPUB Specific Toolbar (Visible only when reading EPUB) -->
             <div id="split-epub-toolbar" class="hidden h-10 px-4 bg-sand/90 border-b border-wood flex items-center justify-between text-xs text-soil shrink-0">
                 <div class="flex items-center gap-2">
-                    <button type="button" onclick="Lexicon.Reader.prevEpubPage()" class="p-1 rounded hover:bg-wood/40 transition-colors" title="Página anterior (←)">
-                        <i class="ph ph-caret-left text-sm"></i>
+                    <button type="button" data-lx-click="Reader.prevEpubPage" class="p-1 rounded hover:bg-wood/40 transition-colors" title="Página anterior (←)" data-i18n-title="reader.prevPage" aria-label="Página anterior (←)">
+                        <i class="ph ph-caret-left text-sm" aria-hidden="true"></i>
                     </button>
-                    <button type="button" onclick="Lexicon.Reader.nextEpubPage()" class="p-1 rounded hover:bg-wood/40 transition-colors" title="Próxima página (→)">
-                        <i class="ph ph-caret-right text-sm"></i>
+                    <button type="button" data-lx-click="Reader.nextEpubPage" class="p-1 rounded hover:bg-wood/40 transition-colors" title="Próxima página (→)" data-i18n-title="reader.nextPage" aria-label="Próxima página (→)">
+                        <i class="ph ph-caret-right text-sm" aria-hidden="true"></i>
                     </button>
-                    <select id="split-epub-toc-select" onchange="Lexicon.Reader.jumpToEpubChapter(this.value)" 
+                    <select id="split-epub-toc-select" data-lx-change="Reader.jumpToEpubChapter" data-lx-args='["$value"]' 
                             class="bg-white border border-wood rounded px-2 py-0.5 text-xs text-soil max-w-[180px] outline-none truncate">
-                        <option value="">Capítulos</option>
+                        <option value="" data-i18n="reader.chapters">Capítulos</option>
                     </select>
-                    <span id="split-epub-progress" class="text-[10px] text-earth/70 font-mono">0% lido</span>
+                    <span id="split-epub-progress" class="text-[10px] text-earth/70 font-mono" aria-live="polite"></span>
                 </div>
 
                 <div class="flex items-center gap-3">
                     <!-- Font Size -->
                     <div class="flex items-center gap-1 border border-wood rounded px-1.5 py-0.5 bg-white">
-                        <button type="button" onclick="Lexicon.Reader.changeEpubFontSize(-2)" class="px-1 text-xs hover:text-jungle font-bold" title="Diminuir fonte">A-</button>
+                        <button type="button" data-lx-click="Reader.changeEpubFontSize" data-lx-args='[-2]' class="px-1 text-xs hover:text-jungle font-bold" title="Diminuir fonte" data-i18n-title="reader.fontSmaller" aria-label="Diminuir fonte">A-</button>
                         <span id="split-epub-font-size-label" class="text-[10px] text-earth font-mono">16px</span>
-                        <button type="button" onclick="Lexicon.Reader.changeEpubFontSize(2)" class="px-1 text-xs hover:text-jungle font-bold" title="Aumentar fonte">A+</button>
+                        <button type="button" data-lx-click="Reader.changeEpubFontSize" data-lx-args='[2]' class="px-1 text-xs hover:text-jungle font-bold" title="Aumentar fonte" data-i18n-title="reader.fontBigger" aria-label="Aumentar fonte">A+</button>
                     </div>
                     <!-- Font Family -->
-                    <select onchange="Lexicon.Reader.changeEpubFontFamily(this.value)" class="bg-white border border-wood rounded px-2 py-0.5 text-xs text-soil outline-none">
+                    <select data-lx-change="Reader.changeEpubFontFamily" data-lx-args='["$value"]' class="bg-white border border-wood rounded px-2 py-0.5 text-xs text-soil outline-none">
                         <option value="serif">Serif</option>
                         <option value="sans">Sans</option>
                         <option value="mono">Mono</option>
                     </select>
                     <!-- Themes -->
                     <div class="flex items-center gap-1">
-                        <button type="button" onclick="Lexicon.Reader.changeEpubTheme('light')" class="w-4 h-4 rounded-full bg-[#FCFAF8] border border-wood" title="Tema Claro"></button>
-                        <button type="button" onclick="Lexicon.Reader.changeEpubTheme('sepia')" class="w-4 h-4 rounded-full bg-[#F4F1EA] border border-wood" title="Tema Sépia"></button>
-                        <button type="button" onclick="Lexicon.Reader.changeEpubTheme('dark')" class="w-4 h-4 rounded-full bg-[#2D251F] border border-earth" title="Tema Escuro"></button>
+                        <button type="button" data-lx-click="Reader.changeEpubTheme" data-lx-args='["light"]' class="w-4 h-4 rounded-full bg-[#FCFAF8] border border-wood" title="Tema Claro" data-i18n-title="reader.themeLight" aria-label="Tema Claro"></button>
+                        <button type="button" data-lx-click="Reader.changeEpubTheme" data-lx-args='["sepia"]' class="w-4 h-4 rounded-full bg-[#F4F1EA] border border-wood" title="Tema Sépia" data-i18n-title="reader.themeSepia" aria-label="Tema Sépia"></button>
+                        <button type="button" data-lx-click="Reader.changeEpubTheme" data-lx-args='["dark"]' class="w-4 h-4 rounded-full bg-[#2D251F] border border-earth" title="Tema Escuro" data-i18n-title="reader.themeDark" aria-label="Tema Escuro"></button>
                     </div>
                 </div>
             </div>
@@ -712,7 +689,7 @@
 
             <!-- Viewers Containers (Flush edge-to-edge) -->
             <div class="flex-1 w-full h-full relative overflow-hidden bg-paper">
-                <iframe id="split-pdf-frame" class="w-full h-full border-0 bg-paper" src="about:blank"></iframe>
+                <iframe id="split-pdf-frame" class="w-full h-full border-0 bg-paper" src="about:blank" title="Document viewer" data-i18n-title="reader.viewerTitle"></iframe>
                 <div id="split-epub-container" class="w-full h-full hidden overflow-hidden bg-paper"></div>
             </div>
         </div>
@@ -726,7 +703,7 @@
                 <div class="flex items-center justify-between gap-2">
                     <div class="flex items-center gap-2.5 min-w-0 pr-1">
                         <div class="w-7 h-7 rounded-lg bg-sand border border-wood flex items-center justify-center shrink-0">
-                            <i id="split-file-icon" class="ph ph-file-pdf text-base text-terracotta"></i>
+                            <i id="split-file-icon" class="ph ph-file-pdf text-base text-terracotta" aria-hidden="true"></i>
                         </div>
                         <div class="min-w-0">
                             <h2 id="split-title" class="text-xs sm:text-sm font-serif font-bold text-soil truncate" title="">Título do Documento</h2>
@@ -737,32 +714,32 @@
                     <!-- Window Actions -->
                     <div class="flex items-center gap-1 shrink-0">
                         <!-- Open in External Browser Tab -->
-                        <button type="button" onclick="Lexicon.Reader.openInExternalTab()" 
+                        <button type="button" data-lx-click="Reader.openInExternalTab" 
                                 class="p-1.5 text-earth hover:text-soil hover:bg-wood/40 border border-wood rounded-lg transition-colors cursor-pointer" 
-                                title="Abrir em aba externa do navegador">
-                            <i class="ph ph-arrow-square-out text-sm"></i>
+                                title="Abrir em aba externa do navegador" data-i18n-title="reader.openExternal" aria-label="Abrir em aba externa do navegador">
+                            <i class="ph ph-arrow-square-out text-sm" aria-hidden="true"></i>
                         </button>
 
                         <!-- Fullscreen Toggle -->
-                        <button type="button" onclick="Lexicon.Reader.toggleFullscreen()" 
+                        <button type="button" data-lx-click="Reader.toggleFullscreen" 
                                 class="p-1.5 text-earth hover:text-soil hover:bg-wood/40 border border-wood rounded-lg transition-colors cursor-pointer" 
-                                title="Alternar tela cheia">
-                            <i id="split-fullscreen-icon" class="ph ph-arrows-out text-sm"></i>
+                                title="Alternar tela cheia" data-i18n-title="reader.fullscreen" aria-label="Alternar tela cheia">
+                            <i id="split-fullscreen-icon" class="ph ph-arrows-out text-sm" aria-hidden="true"></i>
                         </button>
 
                         <!-- Switch to Full Inspector Modal -->
-                        <button type="button" onclick="Lexicon.Reader.switchToInspector()" 
+                        <button type="button" data-lx-click="Reader.switchToInspector" 
                                 class="p-1.5 sm:px-2 sm:py-1 text-xs font-medium text-soil hover:bg-wood/40 border border-wood rounded-lg transition-colors cursor-pointer flex items-center gap-1" 
-                                title="Ver todos os metadados no Inspetor">
-                            <i class="ph ph-sliders-horizontal text-sm"></i>
-                            <span class="hidden sm:inline text-[11px]">Inspetor</span>
+                                title="Ver todos os metadados no Inspetor" data-i18n-title="reader.toInspectorTitle" aria-label="Ver todos os metadados no Inspetor">
+                            <i class="ph ph-sliders-horizontal text-sm" aria-hidden="true"></i>
+                            <span class="hidden sm:inline text-[11px]" data-i18n="reader.inspector">Inspetor</span>
                         </button>
 
                         <!-- Close Reader -->
-                        <button type="button" onclick="Lexicon.Reader.close()" 
+                        <button type="button" data-lx-click="Reader.close" 
                                 class="p-1.5 text-earth hover:text-soil hover:bg-wood/40 border border-wood rounded-lg transition-colors cursor-pointer ml-0.5" 
-                                title="Fechar Leitor (Esc)">
-                            <i class="ph ph-x text-base"></i>
+                                title="Fechar Leitor (Esc)" data-i18n-title="reader.close" aria-label="Fechar Leitor (Esc)">
+                            <i class="ph ph-x text-base" aria-hidden="true"></i>
                         </button>
                     </div>
                 </div>
@@ -770,19 +747,19 @@
                 <!-- Bottom Row: Status & Collection Selectors -->
                 <div class="flex items-center gap-2 pt-1 border-t border-wood/40">
                     <div class="flex items-center gap-1.5 flex-1 min-w-0">
-                        <span class="text-[10px] uppercase font-bold text-earth shrink-0">Status:</span>
-                        <select id="split-status-select" onchange="Lexicon.Reader.saveCurrentNotes()" 
+                        <span class="text-[10px] uppercase font-bold text-earth shrink-0" data-i18n="reader.statusLabel">Status:</span>
+                        <select id="split-status-select" data-lx-change="Reader.saveCurrentNotes" 
                                 class="w-full bg-sand border border-wood rounded-lg px-2 py-1 text-xs text-soil outline-none focus:border-jungle font-medium cursor-pointer">
                             <option value="inbox">Inbox</option>
-                            <option value="reading">Lendo</option>
-                            <option value="processing">Fichamento</option>
-                            <option value="archived">Arquivado</option>
+                            <option value="reading" data-i18n="nav.reading">Lendo</option>
+                            <option value="processing" data-i18n="nav.processing">Fichamento</option>
+                            <option value="archived" data-i18n="nav.archived">Arquivado</option>
                         </select>
                     </div>
 
                     <div class="flex items-center gap-1.5 flex-1 min-w-0">
-                        <span class="text-[10px] uppercase font-bold text-earth shrink-0">Coleção:</span>
-                        <select id="split-collection-select" onchange="Lexicon.Reader.saveCurrentNotes()" 
+                        <span class="text-[10px] uppercase font-bold text-earth shrink-0" data-i18n="reader.collectionLabel">Coleção:</span>
+                        <select id="split-collection-select" data-lx-change="Reader.saveCurrentNotes" 
                                 class="w-full bg-sand border border-wood rounded-lg px-2 py-1 text-xs text-soil outline-none focus:border-jungle font-medium cursor-pointer truncate">
                             <!-- Populated dynamically -->
                         </select>
@@ -797,18 +774,18 @@
                 <div class="bg-paper border border-wood rounded-xl p-3.5 shadow-2xs space-y-2">
                     <div class="flex items-center justify-between">
                         <label class="text-[11px] font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                            <i class="ph ph-text-align-left text-jungle text-sm"></i>
-                            <span>Resumo & Abstract Oficial</span>
+                            <i class="ph ph-text-align-left text-jungle text-sm" aria-hidden="true"></i>
+                            <span data-i18n="reader.summaryTitle">Resumo & Abstract Oficial</span>
                         </label>
-                        <button type="button" onclick="Lexicon.Librarian.summarizeCurrentDocument()" 
+                        <button type="button" data-lx-click="Librarian.summarizeCurrentDocument" data-ai-action="summarize"
                                 class="px-2 py-0.5 bg-jungle/10 hover:bg-jungle/20 text-canopy border border-jungle/30 rounded-md text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer">
-                            <i class="ph ph-sparkle text-jungle text-xs"></i>
-                            <span>Resumir com IA</span>
+                            <i class="ph ph-sparkle text-jungle text-xs" aria-hidden="true"></i>
+                            <span data-i18n="inspector.aiSummarize">Resumir com IA</span>
                         </button>
                     </div>
                     <textarea id="split-reader-summary" rows="3" 
-                              oninput="Lexicon.Reader.onNotesInput()"
-                              placeholder="Resumo executivo do artigo..."
+                              data-lx-input="Reader.onNotesInput"
+                              placeholder="Resumo executivo do artigo..." data-i18n-placeholder="reader.summaryPlaceholder"
                               class="w-full p-2.5 bg-sand/50 border border-wood/70 rounded-lg text-xs text-soil leading-relaxed outline-none focus:border-jungle focus:ring-1 focus:ring-jungle resize-y font-serif"></textarea>
                 </div>
 
@@ -816,60 +793,60 @@
                 <div class="flex-1 flex flex-col bg-paper border border-wood rounded-xl p-4 shadow-2xs space-y-2 min-h-[350px]">
                     <div class="flex items-center justify-between border-b border-wood/50 pb-2">
                         <label class="text-xs font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                            <i class="ph ph-notebook text-terracotta text-base"></i>
-                            <span>Fichamento de Leitura</span>
+                            <i class="ph ph-notebook text-terracotta text-base" aria-hidden="true"></i>
+                            <span data-i18n="reader.notesTitle">Fichamento de Leitura</span>
                         </label>
                         <div class="flex items-center gap-2.5">
-                            <span id="split-notes-save-indicator" class="text-[10px] text-earth/70 italic">Salvo automaticamente</span>
-                            <button type="button" onclick="Lexicon.Reader.exportConsolidatedMarkdown()" 
+                            <span id="split-notes-save-indicator" class="text-[10px] text-earth/70 italic" aria-live="polite" data-i18n="reader.autoSaved">Salvo automaticamente</span>
+                            <button type="button" data-lx-click="Reader.exportConsolidatedMarkdown" 
                                     class="text-xs text-jungle hover:underline font-semibold flex items-center gap-1 cursor-pointer"
-                                    title="Exportar Fichamento estruturado completo em Markdown (.md)">
-                                <i class="ph ph-download-simple"></i>
-                                <span>Exportar (.md)</span>
+                                    title="Exportar Fichamento estruturado completo em Markdown (.md)" data-i18n-title="reader.exportTitle" aria-label="Exportar Fichamento estruturado completo em Markdown (.md)">
+                                <i class="ph ph-download-simple" aria-hidden="true"></i>
+                                <span data-i18n="reader.export">Exportar (.md)</span>
                             </button>
                         </div>
                     </div>
 
                     <!-- Fichamento Toolbar -->
                     <div class="flex flex-wrap items-center gap-1 py-1 px-1.5 bg-sand/80 border border-wood/70 rounded-lg text-earth text-xs">
-                        <button type="button" onclick="Lexicon.Reader.insertFormatting('bold')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Negrito">B</button>
-                        <button type="button" onclick="Lexicon.Reader.insertFormatting('italic')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil italic" title="Itálico">I</button>
-                        <button type="button" onclick="Lexicon.Reader.insertFormatting('h2')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Título H2">H2</button>
-                        <button type="button" onclick="Lexicon.Reader.insertFormatting('quote')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Citação em bloco"><i class="ph ph-quotes"></i></button>
-                        <button type="button" onclick="Lexicon.Reader.insertFormatting('bullet')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Lista de marcadores"><i class="ph ph-list-bullets"></i></button>
-                        <button type="button" onclick="Lexicon.Reader.insertFormatting('date')" class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil text-[11px]" title="Inserir data"><i class="ph ph-calendar"></i> Data</button>
+                        <button type="button" data-lx-click="Reader.insertFormatting" data-lx-args='["bold"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Negrito" data-i18n-title="format.boldTitle" aria-label="Negrito">B</button>
+                        <button type="button" data-lx-click="Reader.insertFormatting" data-lx-args='["italic"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil italic" title="Itálico" data-i18n-title="format.italicTitle" aria-label="Itálico">I</button>
+                        <button type="button" data-lx-click="Reader.insertFormatting" data-lx-args='["h2"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil font-bold" title="Título H2" data-i18n-title="format.headingTitle" aria-label="Título H2">H2</button>
+                        <button type="button" data-lx-click="Reader.insertFormatting" data-lx-args='["quote"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Citação em bloco" data-i18n-title="format.quoteTitle" aria-label="Citação em bloco"><i class="ph ph-quotes" aria-hidden="true"></i></button>
+                        <button type="button" data-lx-click="Reader.insertFormatting" data-lx-args='["bullet"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil" title="Lista de marcadores" data-i18n-title="format.bulletTitle" aria-label="Lista de marcadores"><i class="ph ph-list-bullets" aria-hidden="true"></i></button>
+                        <button type="button" data-lx-click="Reader.insertFormatting" data-lx-args='["date"]' class="px-2 py-0.5 rounded hover:bg-wood/50 hover:text-soil text-[11px]" title="Inserir data" data-i18n-title="format.dateTitle" aria-label="Inserir data"><i class="ph ph-calendar" aria-hidden="true"></i> <span data-i18n="format.date">Data</span></button>
 
                         <div class="w-px h-4 bg-wood/60 mx-0.5"></div>
 
                         <!-- Quick Citation Shortcut -->
-                        <button type="button" onclick="Lexicon.Reader.insertQuickCitation()" 
+                        <button type="button" data-lx-click="Reader.insertQuickCitation" 
                                 class="px-2 py-0.5 rounded bg-wood/40 hover:bg-wood/70 text-soil font-medium flex items-center gap-1 text-[11px] cursor-pointer" 
-                                title="Inserir citação formatada (> trecho com página e data)">
-                            <i class="ph ph-quotes text-jungle text-xs"></i>
-                            <span>Citação</span>
+                                title="Inserir citação formatada (> trecho com página e data)" data-i18n-title="inspector.quickCiteTitle">
+                            <i class="ph ph-quotes text-jungle text-xs" aria-hidden="true"></i>
+                            <span data-i18n="inspector.quickCite">Citação</span>
                         </button>
 
                         <!-- AI Structure Notes Button -->
-                        <button type="button" onclick="Lexicon.Librarian.structureCurrentNotes()" 
+                        <button type="button" data-lx-click="Librarian.structureCurrentNotes" data-ai-action="structure"
                                 class="px-2.5 py-0.5 rounded bg-jungle/15 hover:bg-jungle/25 text-canopy font-semibold flex items-center gap-1 text-[11px] border border-jungle/30 transition-colors ml-auto cursor-pointer" 
-                                title="Estruturar notas no padrão Markdown acadêmico">
-                            <i class="ph ph-sparkle text-xs text-jungle"></i>
-                            <span>Estruturar</span>
+                                title="Estruturar notas no padrão Markdown acadêmico" data-i18n-title="reader.structureTitle" aria-label="Estruturar notas no padrão Markdown acadêmico">
+                            <i class="ph ph-sparkle text-xs text-jungle" aria-hidden="true"></i>
+                            <span data-i18n="reader.structure">Estruturar</span>
                         </button>
                     </div>
 
                     <!-- Main Split Notes Textarea -->
                     <textarea id="split-reader-notes" 
-                              oninput="Lexicon.Reader.onNotesInput()"
-                              placeholder="Escreva anotações, sínteses, citações... Digite [[ para conectar outro artigo via Zettelkasten..." 
+                              data-lx-input="Reader.onNotesInput"
+                              placeholder="Escreva anotações, sínteses, citações... Digite [[ para conectar outro artigo via Zettelkasten..." data-i18n-placeholder="reader.notesPlaceholder" 
                               class="flex-1 min-h-[180px] w-full p-3 bg-white border border-wood rounded-xl text-sm text-soil outline-none focus:border-jungle focus:ring-1 focus:ring-jungle resize-y font-sans leading-relaxed"></textarea>
 
                     <!-- Backlinks Section in Split-View -->
                     <div class="pt-2 border-t border-wood/40">
                         <div class="flex items-center justify-between mb-1.5">
                             <label class="text-[11px] font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                                <i class="ph ph-graph text-jungle"></i>
-                                <span>Citações Reversas (Backlinks)</span>
+                                <i class="ph ph-graph text-jungle" aria-hidden="true"></i>
+                                <span data-i18n="zettelkasten.backlinksTitle">Citações Reversas (Backlinks)</span>
                             </label>
                             <span class="text-[10px] text-earth/70 font-mono">[[Wikilinks]]</span>
                         </div>
@@ -886,25 +863,25 @@
     <!-- ==================================================================== -->
     <!-- MODAL: ADD / IMPORT DOCUMENTS & FOLDERS                             -->
     <!-- ==================================================================== -->
-    <div id="upload-modal" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
+    <div id="upload-modal" aria-hidden="true" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
         <div class="bg-paper rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden transform scale-95 opacity-0 modal-content flex flex-col max-h-[90vh]" id="upload-modal-content">
             <!-- Modal Header & Tabs -->
             <div class="border-b border-wood bg-clay shrink-0">
                 <div class="px-6 py-3.5 flex justify-between items-center">
                     <h3 class="text-base font-semibold text-soil flex items-center gap-2">
-                        <i class="ph ph-file-plus text-jungle text-lg"></i> <span data-i18n="upload.modalTitle">Add Documents to Catalog</span>
+                        <i class="ph ph-file-plus text-jungle text-lg" aria-hidden="true"></i> <span data-i18n="upload.modalTitle">Add Documents to Catalog</span>
                     </h3>
-                    <button onclick="closeModal('upload-modal')" class="text-earth hover:text-soil transition-colors p-1 rounded-lg cursor-pointer" title="Close" data-i18n-title="common.close">
-                        <i class="ph ph-x text-lg"></i>
+                    <button data-lx-click="closeModal" data-lx-args='["upload-modal"]' class="text-earth hover:text-soil transition-colors p-1 rounded-lg cursor-pointer" title="Close" data-i18n-title="common.close" aria-label="Close">
+                        <i class="ph ph-x text-lg" aria-hidden="true"></i>
                     </button>
                 </div>
                 <!-- Navigation Tabs -->
                 <div class="flex border-t border-wood/60 px-6 gap-2 bg-clay/60">
-                    <button type="button" id="tab-btn-single" onclick="Lexicon.Articles.switchUploadTab('single')" class="modal-tab active flex items-center gap-2">
-                        <i class="ph ph-file-text"></i> <span data-i18n="upload.tabSingle">Single Document</span>
+                    <button type="button" id="tab-btn-single" data-lx-click="Articles.switchUploadTab" data-lx-args='["single"]' class="modal-tab active flex items-center gap-2">
+                        <i class="ph ph-file-text" aria-hidden="true"></i> <span data-i18n="upload.tabSingle">Single Document</span>
                     </button>
-                    <button type="button" id="tab-btn-multi" onclick="Lexicon.Articles.switchUploadTab('multi')" class="modal-tab flex items-center gap-2">
-                        <i class="ph ph-folder-simple-plus"></i> <span data-i18n="upload.tabMulti">Import Files & Folders</span>
+                    <button type="button" id="tab-btn-multi" data-lx-click="Articles.switchUploadTab" data-lx-args='["multi"]' class="modal-tab flex items-center gap-2">
+                        <i class="ph ph-folder-simple-plus" aria-hidden="true"></i> <span data-i18n="upload.tabMulti">Import Files & Folders</span>
                     </button>
                 </div>
             </div>
@@ -913,16 +890,16 @@
             <div id="upload-tab-single" class="p-6 overflow-y-auto flex-1 space-y-4">
                 <!-- Dropzone for physical file -->
                 <div id="drop-zone" class="dropzone border-2 border-dashed border-leaf/50 rounded-xl p-5 text-center bg-sand hover:bg-wood/20 transition-all cursor-pointer group mb-4">
-                    <input type="file" id="file-upload" accept=".pdf,.epub,.doc,.docx,.txt,.md" class="hidden">
+                    <input type="file" id="file-upload" accept=".pdf,.epub,.doc,.docx,.txt,.md,.mobi,.djvu" class="hidden">
                     <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto text-jungle shadow-xs mb-2 group-hover:scale-105 transition-transform">
-                        <i class="ph ph-upload-simple text-xl"></i>
+                        <i class="ph ph-upload-simple text-xl" aria-hidden="true"></i>
                     </div>
                     <p class="text-soil font-semibold text-xs" data-i18n="upload.dropTitle">Drop document/book here or click to browse</p>
                     <p class="text-earth/80 text-[11px] mt-0.5" data-i18n="upload.dropSubtitle">Supports PDF, EPUB, Word, and Markdown</p>
                     <p id="selected-file-name" class="text-xs font-bold text-jungle mt-2 truncate"></p>
                 </div>
 
-                <form id="add-article-form" class="space-y-4" onsubmit="event.preventDefault(); Lexicon.Articles.handleAddArticleSubmit();">
+                <form id="add-article-form" class="space-y-4" data-lx-submit="Articles.handleAddArticleSubmit">
                     <div>
                         <label class="block text-xs font-bold text-soil uppercase tracking-wider mb-1" data-i18n="inspector.fieldTitle">Title *</label>
                         <input type="text" id="form-title" required placeholder="e.g. Canopy Dynamics in Humid Tropical Forests" 
@@ -953,10 +930,10 @@
                             <div class="flex gap-1.5">
                                 <input type="text" id="form-doi" placeholder="e.g. 10.1016/... or arXiv:2301.12345" 
                                        class="flex-1 min-w-0 px-3 py-2 bg-white border border-wood focus:border-jungle focus:ring-2 focus:ring-leaf/20 rounded-xl outline-none text-sm text-soil font-mono">
-                                <button type="button" id="btn-form-fetch-doi" onclick="Lexicon.Academic.fetchUploadFormMetadata()" 
+                                <button type="button" id="btn-form-fetch-doi" data-lx-click="Academic.fetchUploadFormMetadata" 
                                         class="px-2.5 py-2 bg-jungle/10 hover:bg-jungle/20 text-canopy border border-jungle/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0" 
-                                        title="Buscar metadados automaticamente via CrossRef ou arXiv" data-i18n-title="inspector.fetchMetadataTitle">
-                                    <i class="ph ph-cloud-arrow-down text-base text-jungle" id="icon-form-fetch-doi"></i>
+                                        title="Buscar metadados automaticamente via CrossRef ou arXiv" data-i18n-title="inspector.fetchMetadataTitle" aria-label="Buscar metadados automaticamente via CrossRef ou arXiv">
+                                    <i class="ph ph-cloud-arrow-down text-base text-jungle" id="icon-form-fetch-doi" aria-hidden="true"></i>
                                     <span id="text-form-fetch-doi" data-i18n="inspector.fetchMetadata">Buscar Metadados</span>
                                 </button>
                             </div>
@@ -994,26 +971,26 @@
             <div id="upload-tab-multi" class="p-6 overflow-y-auto flex-1 space-y-4 hidden">
                 <!-- Dropzone for multiple files & folders -->
                 <div id="drop-zone-multi" class="dropzone border-2 border-dashed border-leaf/50 rounded-xl p-5 text-center bg-sand hover:bg-wood/20 transition-all cursor-pointer group">
-                    <input type="file" id="import-multi-files-input" multiple accept=".pdf,.epub,.doc,.docx,.txt,.md" class="hidden">
+                    <input type="file" id="import-multi-files-input" multiple accept=".pdf,.epub,.doc,.docx,.txt,.md,.mobi,.djvu" class="hidden">
                     <input type="file" id="import-folder-input" webkitdirectory directory multiple class="hidden">
                     
                     <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto text-jungle shadow-xs mb-2 group-hover:scale-105 transition-transform">
-                        <i class="ph ph-folder-open text-xl"></i>
+                        <i class="ph ph-folder-open text-xl" aria-hidden="true"></i>
                     </div>
                     <p class="text-soil font-semibold text-xs" data-i18n="upload.dropMultiTitle">Drag & drop files or entire folders here</p>
                     <p class="text-earth/80 text-[11px] mt-0.5" data-i18n="upload.dropSubtitle">Scans PDFs, EPUBs, Word, Markdown, and preserves folder structure</p>
                     
                     <!-- Browse Buttons -->
-                    <div class="flex flex-wrap items-center justify-center gap-2.5 mt-3.5" onclick="event.stopPropagation()">
-                        <button type="button" onclick="document.getElementById('import-multi-files-input').click()" 
+                    <div class="flex flex-wrap items-center justify-center gap-2.5 mt-3.5" data-lx-stop>
+                        <button type="button" data-lx-click-target="#import-multi-files-input" 
                                 class="px-3 py-1.5 bg-white hover:bg-wood/40 border border-wood rounded-lg text-xs font-semibold text-soil transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer">
-                            <i class="ph ph-files text-jungle"></i>
+                            <i class="ph ph-files text-jungle" aria-hidden="true"></i>
                             <span data-i18n="upload.selectFiles">Choose Multiple Files</span>
                         </button>
-                        <span class="text-xs text-earth/60 font-medium">or</span>
-                        <button type="button" onclick="document.getElementById('import-folder-input').click()" 
+                        <span class="text-xs text-earth/60 font-medium" data-i18n="common.or">or</span>
+                        <button type="button" data-lx-click-target="#import-folder-input" 
                                 class="px-3.5 py-1.5 bg-jungle/10 hover:bg-jungle/20 border border-jungle/30 rounded-lg text-xs font-semibold text-canopy transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer">
-                            <i class="ph ph-folder-notch-open text-jungle"></i>
+                            <i class="ph ph-folder-notch-open text-jungle" aria-hidden="true"></i>
                             <span data-i18n="upload.selectFolder">Choose Entire Folder</span>
                         </button>
                     </div>
@@ -1022,8 +999,8 @@
                 <!-- Organization Options -->
                 <div class="p-3.5 bg-sand/60 border border-wood rounded-xl space-y-2.5">
                     <div class="text-[11px] font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                        <i class="ph ph-gear-six text-leaf"></i>
-                        <span>Auto-Organization Settings</span>
+                        <i class="ph ph-gear-six text-leaf" aria-hidden="true"></i>
+                        <span data-i18n="upload.autoOrgTitle">Auto-Organization Settings</span>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -1033,7 +1010,7 @@
                         </label>
                         <label class="flex items-center gap-2 cursor-pointer select-none">
                             <input type="checkbox" id="import-opt-folder-tags" checked class="w-4 h-4 rounded text-jungle focus:ring-jungle border-wood">
-                            <span class="text-soil text-[11px]">Tag documents with folder name</span>
+                            <span class="text-soil text-[11px]" data-i18n="upload.tagWithFolder">Tag documents with folder name</span>
                         </label>
                     </div>
 
@@ -1045,7 +1022,7 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-[11px] font-semibold text-earth mb-1">Initial Workflow Status</label>
+                            <label class="block text-[11px] font-semibold text-earth mb-1" data-i18n="upload.initialStatus">Initial Workflow Status</label>
                             <select id="import-opt-status" class="w-full px-2.5 py-1.5 bg-white border border-wood rounded-lg text-xs text-soil outline-none focus:border-jungle">
                                 <option value="inbox" data-i18n="nav.inbox">Inbox</option>
                                 <option value="reading" data-i18n="nav.reading">Reading List</option>
@@ -1060,7 +1037,7 @@
                 <div id="staged-files-section" class="hidden space-y-2">
                     <div class="flex items-center justify-between">
                         <span id="staged-count-text" class="text-xs font-bold text-soil">0 files detected</span>
-                        <button type="button" onclick="Lexicon.Articles.clearStagedFiles()" class="text-xs text-terracotta hover:underline font-medium cursor-pointer" data-i18n="upload.clearStaging">Clear staging</button>
+                        <button type="button" data-lx-click="Articles.clearStagedFiles" class="text-xs text-terracotta hover:underline font-medium cursor-pointer" data-i18n="upload.clearStaging">Clear staging</button>
                     </div>
                     
                     <div id="staged-files-list" class="max-h-44 overflow-y-auto border border-wood rounded-xl bg-white divide-y divide-wood/40 text-xs">
@@ -1071,7 +1048,7 @@
                 <!-- Progress Bar -->
                 <div id="import-progress-container" class="hidden space-y-1.5">
                     <div class="flex justify-between text-xs font-semibold text-soil">
-                        <span id="import-progress-label">Importing documents...</span>
+                        <span id="import-progress-label" aria-live="polite" data-i18n="upload.importing">Importing documents...</span>
                         <span id="import-progress-percent">0%</span>
                     </div>
                     <div class="w-full bg-wood/40 rounded-full h-2.5 overflow-hidden">
@@ -1082,10 +1059,10 @@
 
             <!-- Modal Footer -->
             <div class="px-6 py-4 bg-clay border-t border-wood flex justify-between items-center shrink-0">
-                <button type="button" onclick="closeModal('upload-modal')" class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">Cancel</button>
+                <button type="button" data-lx-click="closeModal" data-lx-args='["upload-modal"]' class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">Cancel</button>
                 <div class="flex gap-2">
-                    <button type="button" id="submit-article-btn" onclick="Lexicon.Articles.handleAddArticleSubmit()" class="px-5 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="upload.saveToLibrary">Save to Library</button>
-                    <button type="button" id="submit-multi-import-btn" onclick="Lexicon.Articles.executeMultiImport()" class="hidden px-5 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm disabled:opacity-50 cursor-pointer" data-i18n="upload.importDocs" disabled>Import Documents</button>
+                    <button type="button" id="submit-article-btn" data-lx-click="Articles.handleAddArticleSubmit" class="px-5 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="upload.saveToLibrary">Save to Library</button>
+                    <button type="button" id="submit-multi-import-btn" data-lx-click="Articles.executeMultiImport" class="hidden px-5 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm disabled:opacity-50 cursor-pointer" data-i18n="upload.importDocs" disabled>Import Documents</button>
                 </div>
             </div>
         </div>
@@ -1094,26 +1071,26 @@
     <!-- ==================================================================== -->
     <!-- MODAL: NEW COLLECTION                                                -->
     <!-- ==================================================================== -->
-    <div id="collection-modal" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
+    <div id="collection-modal" aria-hidden="true" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
         <div class="bg-paper rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 opacity-0 modal-content" id="collection-modal-content">
             <div class="px-6 py-4 border-b border-wood flex justify-between items-center bg-clay">
                 <h3 class="text-base font-semibold text-soil flex items-center gap-2">
-                    <i class="ph ph-folder-plus text-terracotta text-lg"></i> <span data-i18n="collections.createModalTitle">New Collection</span>
+                    <i class="ph ph-folder-plus text-terracotta text-lg" aria-hidden="true"></i> <span data-i18n="collections.createModalTitle">New Collection</span>
                 </h3>
-                <button onclick="closeModal('collection-modal')" class="text-earth hover:text-soil transition-colors p-1 rounded-lg cursor-pointer" title="Close" data-i18n-title="common.close">
-                    <i class="ph ph-x text-lg"></i>
+                <button data-lx-click="closeModal" data-lx-args='["collection-modal"]' class="text-earth hover:text-soil transition-colors p-1 rounded-lg cursor-pointer" title="Close" data-i18n-title="common.close" aria-label="Close">
+                    <i class="ph ph-x text-lg" aria-hidden="true"></i>
                 </button>
             </div>
             <div class="p-6">
                 <label class="block text-xs font-bold text-soil uppercase tracking-wider mb-1" data-i18n="collections.inputLabel">Collection Name</label>
                 <input type="text" id="new-collection-name" placeholder="e.g. Distributed Biomimicry" 
                        data-i18n-placeholder="collections.inputPlaceholder"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault(); Lexicon.Collections.create();}"
+                       data-lx-enter="Collections.create"
                        class="w-full px-3 py-2 bg-white border border-wood focus:border-jungle focus:ring-2 focus:ring-leaf/20 rounded-xl outline-none text-sm text-soil">
             </div>
             <div class="px-6 py-4 bg-clay border-t border-wood flex justify-end gap-2">
-                <button type="button" onclick="closeModal('collection-modal')" class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">Cancel</button>
-                <button type="button" onclick="Lexicon.Collections.create()" class="px-4 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="collections.createBtn">Create Collection</button>
+                <button type="button" data-lx-click="closeModal" data-lx-args='["collection-modal"]' class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">Cancel</button>
+                <button type="button" data-lx-click="Collections.create" class="px-4 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="collections.createBtn">Create Collection</button>
             </div>
         </div>
     </div>
@@ -1121,14 +1098,14 @@
     <!-- ==================================================================== -->
     <!-- FLOATING BATCH ACTION BAR (FOR MULTIPLE SELECTIONS)                   -->
     <!-- ==================================================================== -->
-    <div id="batch-action-bar" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-soil text-paper px-4 sm:px-5 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-2.5 border border-wood/30 hidden-bar">
+    <div id="batch-action-bar" role="toolbar" aria-label="Batch actions" aria-hidden="true" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-soil text-paper px-4 sm:px-5 py-3 rounded-2xl shadow-2xl flex flex-wrap items-center gap-2.5 border border-wood/30 hidden-bar">
         <div class="flex items-center gap-2 pr-3 border-r border-white/20">
             <span class="w-2.5 h-2.5 rounded-full bg-terracotta animate-ping"></span>
             <span id="batch-selected-count" class="text-xs font-bold text-white whitespace-nowrap">0 selected</span>
         </div>
 
         <!-- Batch Status Selector -->
-        <select id="batch-status-select" onchange="Lexicon.Articles.batchChangeStatus(this.value); this.value='';" 
+        <select id="batch-status-select" data-lx-change="Articles.batchChangeStatus" data-lx-args='["$value"]' 
                 class="bg-earth text-white border border-wood/40 rounded-lg px-2.5 py-1 text-xs outline-none cursor-pointer">
             <option value="" data-i18n="nav.workflow">Change Status...</option>
             <option value="inbox" data-i18n="nav.inbox">Inbox</option>
@@ -1138,75 +1115,75 @@
         </select>
 
         <!-- Batch Collection Selector -->
-        <select id="batch-collection-select" onchange="Lexicon.Articles.batchSetCollection(this.value); this.value='';" 
+        <select id="batch-collection-select" data-lx-change="Articles.batchSetCollection" data-lx-args='["$value"]' 
                 class="bg-earth text-white border border-wood/40 rounded-lg px-2.5 py-1 text-xs outline-none cursor-pointer">
-            <option value="">Move to Collection...</option>
+            <option value="" data-i18n="batch.moveToCollection">Move to Collection...</option>
         </select>
 
         <!-- Batch Create New Collection Button -->
-        <button onclick="Lexicon.Articles.batchCreateCollectionPrompt()" 
-                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-leaf/25 hover:bg-leaf text-white font-medium transition-colors cursor-pointer" title="Create a new collection for selected documents" data-i18n-title="batch.newCollection">
-            <i class="ph ph-folder-plus"></i> <span data-i18n="batch.newCollection">New Collection</span>
+        <button data-lx-click="Articles.batchCreateCollectionPrompt" 
+                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-leaf/25 hover:bg-leaf text-white font-medium transition-colors cursor-pointer" title="Create a new collection for selected documents" data-i18n-title="batch.newCollection" aria-label="Create a new collection for selected documents">
+            <i class="ph ph-folder-plus" aria-hidden="true"></i> <span data-i18n="batch.newCollection">New Collection</span>
         </button>
 
         <!-- Batch Add Tag Button -->
-        <button onclick="Lexicon.Articles.batchAddTag()" 
-                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer" title="Add tag to selected" data-i18n-title="batch.addTag">
-            <i class="ph ph-tag"></i> <span data-i18n="batch.addTag">Add Tag</span>
+        <button data-lx-click="Articles.batchAddTag" 
+                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer" title="Add tag to selected" data-i18n-title="batch.addTag" aria-label="Add tag to selected">
+            <i class="ph ph-tag" aria-hidden="true"></i> <span data-i18n="batch.addTag">Add Tag</span>
         </button>
 
         <!-- Batch Favorite Button -->
-        <button onclick="Lexicon.Articles.batchToggleFavorite(true)" 
-                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-terracotta transition-colors cursor-pointer" title="Favorite Selected" data-i18n-title="batch.favorite">
-            <i class="ph-fill ph-star"></i> <span data-i18n="batch.favorite">Favorite</span>
+        <button data-lx-click="Articles.batchToggleFavorite" data-lx-args='[true]' 
+                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-terracotta transition-colors cursor-pointer" title="Favorite Selected" data-i18n-title="batch.favorite" aria-label="Favorite Selected">
+            <i class="ph-fill ph-star" aria-hidden="true"></i> <span data-i18n="batch.favorite">Favorite</span>
         </button>
 
         <!-- Batch Export Notes -->
-        <button onclick="Lexicon.Articles.batchExportNotes()" 
-                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-leaf transition-colors cursor-pointer" title="Export Consolidated Notes" data-i18n-title="inspector.exportNotes">
-            <i class="ph ph-download-simple"></i> <span data-i18n="inspector.exportNotes">Notes (.md)</span>
+        <button data-lx-click="Articles.batchExportNotes" 
+                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-leaf transition-colors cursor-pointer" title="Export Consolidated Notes" data-i18n-title="inspector.exportNotes" aria-label="Export Consolidated Notes">
+            <i class="ph ph-download-simple" aria-hidden="true"></i> <span data-i18n="inspector.exportNotes">Notes (.md)</span>
         </button>
 
         <!-- Batch BibTeX Export -->
-        <button onclick="Lexicon.Academic.batchExportBibTeX()" 
+        <button data-lx-click="Academic.batchExportBibTeX" 
                 class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer" 
-                title="Exportar selecionados como BibTeX (.bib)" data-i18n-title="batch.exportBibtexTitle">
-            <i class="ph ph-file-code"></i> <span data-i18n="batch.exportBibtex">BibTeX (.bib)</span>
+                title="Exportar selecionados como BibTeX (.bib)" data-i18n-title="batch.exportBibtexTitle" aria-label="Exportar selecionados como BibTeX (.bib)">
+            <i class="ph ph-file-code" aria-hidden="true"></i> <span data-i18n="batch.exportBibtex">BibTeX (.bib)</span>
         </button>
 
         <!-- Batch RIS Export -->
-        <button onclick="Lexicon.Academic.batchExportRIS()" 
+        <button data-lx-click="Academic.batchExportRIS" 
                 class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer" 
-                title="Exportar selecionados como RIS (.ris) para Zotero / Mendeley" data-i18n-title="batch.exportRisTitle">
-            <i class="ph ph-books"></i> <span data-i18n="batch.exportRis">RIS (.ris)</span>
+                title="Exportar selecionados como RIS (.ris) para Zotero / Mendeley" data-i18n-title="batch.exportRisTitle" aria-label="Exportar selecionados como RIS (.ris) para Zotero / Mendeley">
+            <i class="ph ph-books" aria-hidden="true"></i> <span data-i18n="batch.exportRis">RIS (.ris)</span>
         </button>
 
         <!-- Batch Delete Button -->
-        <button onclick="Lexicon.Articles.batchDelete()" 
-                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-terracotta/20 hover:bg-terracotta text-white transition-colors cursor-pointer" title="Delete Selected" data-i18n-title="batch.delete">
-            <i class="ph ph-trash"></i> <span data-i18n="batch.delete">Delete</span>
+        <button data-lx-click="Articles.batchDelete" 
+                class="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-terracotta/20 hover:bg-terracotta text-white transition-colors cursor-pointer" title="Delete Selected" data-i18n-title="batch.delete" aria-label="Delete Selected">
+            <i class="ph ph-trash" aria-hidden="true"></i> <span data-i18n="batch.delete">Delete</span>
         </button>
 
         <div class="w-px h-5 bg-white/20 mx-1"></div>
 
         <!-- Cancel Selection -->
-        <button onclick="Lexicon.Articles.clearSelection()" 
-                class="text-white/70 hover:text-white p-1 rounded-lg transition-colors cursor-pointer" title="Clear selection" data-i18n-title="batch.clear">
-            <i class="ph ph-x text-base"></i>
+        <button data-lx-click="Articles.clearSelection" 
+                class="text-white/70 hover:text-white p-1 rounded-lg transition-colors cursor-pointer" title="Clear selection" data-i18n-title="batch.clear" aria-label="Clear selection">
+            <i class="ph ph-x text-base" aria-hidden="true"></i>
         </button>
     </div>
 
     <!-- ==================================================================== -->
     <!-- MODAL: BATCH CREATE COLLECTION                                       -->
     <!-- ==================================================================== -->
-    <div id="batch-collection-modal" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
+    <div id="batch-collection-modal" aria-hidden="true" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
         <div class="bg-paper rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 opacity-0 modal-content" id="batch-collection-modal-content">
             <div class="px-6 py-4 border-b border-wood flex justify-between items-center bg-clay">
                 <h3 class="text-base font-semibold text-soil flex items-center gap-2">
-                    <i class="ph ph-folder-plus text-leaf text-lg"></i> <span data-i18n="batch.modalTitle">New Collection for Selected</span>
+                    <i class="ph ph-folder-plus text-leaf text-lg" aria-hidden="true"></i> <span data-i18n="batch.modalTitle">New Collection for Selected</span>
                 </h3>
-                <button onclick="closeModal('batch-collection-modal')" class="text-earth hover:text-soil transition-colors p-1 rounded-lg cursor-pointer" title="Close" data-i18n-title="common.close">
-                    <i class="ph ph-x text-lg"></i>
+                <button data-lx-click="closeModal" data-lx-args='["batch-collection-modal"]' class="text-earth hover:text-soil transition-colors p-1 rounded-lg cursor-pointer" title="Close" data-i18n-title="common.close" aria-label="Close">
+                    <i class="ph ph-x text-lg" aria-hidden="true"></i>
                 </button>
             </div>
             <div class="p-6">
@@ -1214,12 +1191,12 @@
                 <label class="block text-xs font-bold text-soil uppercase tracking-wider mb-1" data-i18n="collections.inputLabel">Collection Name</label>
                 <input type="text" id="batch-new-collection-name" placeholder="e.g. Cognitive Systems" 
                        data-i18n-placeholder="collections.inputPlaceholder"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault(); Lexicon.Articles.submitBatchCreateCollection();}"
+                       data-lx-enter="Articles.submitBatchCreateCollection"
                        class="w-full px-3 py-2 bg-white border border-wood focus:border-jungle focus:ring-2 focus:ring-leaf/20 rounded-xl outline-none text-sm text-soil">
             </div>
             <div class="px-6 py-4 bg-clay border-t border-wood flex justify-end gap-2">
-                <button type="button" onclick="closeModal('batch-collection-modal')" class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">Cancel</button>
-                <button type="button" onclick="Lexicon.Articles.submitBatchCreateCollection()" class="px-4 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="batch.createAndMove">Create & Move</button>
+                <button type="button" data-lx-click="closeModal" data-lx-args='["batch-collection-modal"]' class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">Cancel</button>
+                <button type="button" data-lx-click="Articles.submitBatchCreateCollection" class="px-4 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors shadow-sm cursor-pointer" data-i18n="batch.createAndMove">Create & Move</button>
             </div>
         </div>
     </div>
@@ -1227,13 +1204,13 @@
     <!-- ==================================================================== -->
     <!-- MODAL: RESET SAMPLE DATA (3-STEP CONFIRMATION WIZARD)                -->
     <!-- ==================================================================== -->
-    <div id="reset-modal" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
+    <div id="reset-modal" aria-hidden="true" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
         <div class="bg-paper rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform scale-95 opacity-0 modal-content" id="reset-modal-content">
             <!-- Header with Step Indicator -->
             <div class="px-6 py-4 border-b border-wood bg-clay flex items-center justify-between">
                 <div class="flex items-center gap-2.5">
                     <div class="w-8 h-8 rounded-lg bg-terracotta/20 text-terracotta flex items-center justify-center">
-                        <i class="ph ph-warning text-lg"></i>
+                        <i class="ph ph-warning text-lg" aria-hidden="true"></i>
                     </div>
                     <div>
                         <h3 class="text-sm font-serif font-bold text-soil" data-i18n="reset.title">Reset Sample Data</h3>
@@ -1255,7 +1232,7 @@
                 <div id="reset-step-1-content" class="space-y-4">
                     <div class="p-4 bg-terracotta/10 border border-terracotta/30 rounded-xl">
                         <h4 class="text-xs font-bold text-terracotta uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                            <i class="ph ph-shield-warning text-base"></i> Irreversible Action
+                            <i class="ph ph-shield-warning text-base" aria-hidden="true"></i> <span data-i18n="reset.irreversible">Irreversible Action</span>
                         </h4>
                         <p class="text-xs text-soil leading-relaxed" data-i18n="reset.step1Warning">
                             Resetting will <strong>permanently erase</strong> all custom documents, imported folders, collections, notes, and tags, restoring only the original demo entries.
@@ -1263,9 +1240,13 @@
                     </div>
                     <div class="p-3.5 bg-sand rounded-xl border border-wood/70 text-xs text-earth space-y-2">
                         <p class="font-semibold text-soil" data-i18n="reset.step1Detail">We recommend exporting a backup first:</p>
-                        <button type="button" onclick="Lexicon.Storage.exportJSON()" 
+                        <button type="button" data-lx-click="Storage.exportJSON" 
                                 class="w-full py-2 px-3 bg-white hover:bg-wood/30 border border-wood rounded-lg font-medium text-soil text-xs flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer">
-                            <i class="ph ph-download-simple text-leaf"></i> <span data-i18n="nav.exportBackup">Export Catalog Backup (.json)</span>
+                            <i class="ph ph-download-simple text-leaf" aria-hidden="true"></i> <span data-i18n="nav.exportBackup">Export Catalog Backup (.json)</span>
+                        </button>
+                        <button type="button" data-lx-click="Storage.exportFullBackup" 
+                                class="w-full py-2 px-3 bg-white hover:bg-wood/30 border border-wood rounded-lg font-medium text-soil text-xs flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer">
+                            <i class="ph ph-file-zip text-leaf" aria-hidden="true"></i> <span data-i18n="nav.exportFullBackup">Backup completo (.zip)</span>
                         </button>
                     </div>
                 </div>
@@ -1274,7 +1255,7 @@
                 <div id="reset-step-2-content" class="space-y-4 hidden">
                     <div class="p-4 bg-clay/50 border border-wood rounded-xl text-xs text-soil space-y-2">
                         <div class="font-bold text-soil flex items-center gap-1.5">
-                            <i class="ph ph-trash text-terracotta text-sm"></i>
+                            <i class="ph ph-trash text-terracotta text-sm" aria-hidden="true"></i>
                             <span data-i18n="reset.step2Question">Items scheduled for deletion:</span>
                         </div>
                         <div class="grid grid-cols-2 gap-2 text-xs py-1" id="reset-summary-counts">
@@ -1282,7 +1263,7 @@
                         </div>
                     </div>
                     <label class="flex items-start gap-3 p-3 bg-sand rounded-xl border border-wood cursor-pointer hover:bg-wood/20 transition-colors">
-                        <input type="checkbox" id="reset-ack-checkbox" class="w-4 h-4 mt-0.5 rounded text-terracotta focus:ring-terracotta border-wood cursor-pointer" onchange="Lexicon.Storage.updateResetStep2Button()">
+                        <input type="checkbox" id="reset-ack-checkbox" class="w-4 h-4 mt-0.5 rounded text-terracotta focus:ring-terracotta border-wood cursor-pointer" data-lx-change="Storage.updateResetStep2Button">
                         <span class="text-xs text-soil select-none leading-relaxed" data-i18n="reset.step2Detail">
                             I understand and acknowledge that all my organized documents and notes will be <strong>permanently lost</strong>.
                         </span>
@@ -1293,7 +1274,7 @@
                 <div id="reset-step-3-content" class="space-y-4 hidden">
                     <div class="p-4 bg-terracotta/15 border border-terracotta/40 rounded-xl text-xs text-soil space-y-2">
                         <p class="font-bold text-terracotta flex items-center gap-1.5">
-                            <i class="ph ph-lock-key text-base"></i> Final Verification Step
+                            <i class="ph ph-lock-key text-base" aria-hidden="true"></i> <span data-i18n="reset.finalStep">Final Verification Step</span>
                         </p>
                         <p class="leading-relaxed" data-i18n="reset.step3Instruct">
                             To finalize wiping your library and restoring the default demo data, type <strong class="font-mono text-terracotta font-bold text-sm">RESET</strong> below:
@@ -1302,7 +1283,7 @@
                     <div>
                         <input type="text" id="reset-confirm-input" placeholder="Type RESET to confirm" 
                                data-i18n-placeholder="reset.step3Placeholder"
-                               oninput="Lexicon.Storage.checkResetVerification()" 
+                               data-lx-input="Storage.checkResetVerification" 
                                class="w-full px-3 py-2.5 bg-white border-2 border-wood focus:border-terracotta rounded-xl text-sm font-mono font-bold text-soil uppercase tracking-widest text-center outline-none">
                     </div>
                 </div>
@@ -1310,24 +1291,24 @@
 
             <!-- Footer Navigation Controls -->
             <div class="px-6 py-4 bg-clay border-t border-wood flex items-center justify-between">
-                <button type="button" id="reset-back-btn" onclick="Lexicon.Storage.resetStepBack()" class="px-3 py-1.5 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer hidden" data-i18n="reset.btnBack">
+                <button type="button" id="reset-back-btn" data-lx-click="Storage.resetStepBack" class="px-3 py-1.5 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer hidden" data-i18n="reset.btnBack">
                     ← Back
                 </button>
                 <div class="flex items-center gap-2 ml-auto">
-                    <button type="button" onclick="closeModal('reset-modal')" class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">
+                    <button type="button" data-lx-click="closeModal" data-lx-args='["reset-modal"]' class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">
                         Cancel & Keep Data
                     </button>
                     <!-- Next Button for Step 1 -->
-                    <button type="button" id="reset-step1-next-btn" onclick="Lexicon.Storage.goToResetStep(2)" class="px-4 py-2 bg-terracotta hover:bg-[#c9664c] text-white rounded-xl text-xs font-semibold transition-colors shadow-sm cursor-pointer" data-i18n="reset.btnNext">
+                    <button type="button" id="reset-step1-next-btn" data-lx-click="Storage.goToResetStep" data-lx-args='[2]' class="px-4 py-2 bg-terracotta hover:bg-[#c9664c] text-white rounded-xl text-xs font-semibold transition-colors shadow-sm cursor-pointer" data-i18n="reset.btnNext">
                         Continue to Step 2 →
                     </button>
                     <!-- Next Button for Step 2 -->
-                    <button type="button" id="reset-step2-next-btn" onclick="Lexicon.Storage.goToResetStep(3)" disabled class="px-4 py-2 bg-terracotta/50 text-white/80 rounded-xl text-xs font-semibold transition-colors shadow-sm cursor-not-allowed hidden" data-i18n="reset.btnNext">
+                    <button type="button" id="reset-step2-next-btn" data-lx-click="Storage.goToResetStep" data-lx-args='[3]' disabled class="px-4 py-2 bg-terracotta/50 text-white/80 rounded-xl text-xs font-semibold transition-colors shadow-sm cursor-not-allowed hidden" data-i18n="reset.btnNext">
                         Proceed to Final Step →
                     </button>
                     <!-- Final Erase Button for Step 3 -->
-                    <button type="button" id="reset-final-execute-btn" onclick="Lexicon.Storage.executeReset()" disabled class="px-4 py-2 bg-terracotta/50 text-white/80 rounded-xl text-xs font-semibold transition-colors shadow-sm cursor-not-allowed hidden">
-                        <i class="ph ph-warning-octagon"></i> <span data-i18n="reset.btnConfirmReset">Permanently Erase & Reset</span>
+                    <button type="button" id="reset-final-execute-btn" data-lx-click="Storage.executeReset" disabled class="px-4 py-2 bg-terracotta/50 text-white/80 rounded-xl text-xs font-semibold transition-colors shadow-sm cursor-not-allowed hidden">
+                        <i class="ph ph-warning-octagon" aria-hidden="true"></i> <span data-i18n="reset.btnConfirmReset">Permanently Erase & Reset</span>
                     </button>
                 </div>
             </div>
@@ -1337,36 +1318,36 @@
     <!-- ==================================================================== -->
     <!-- AI LIBRARIAN SETTINGS MODAL                                          -->
     <!-- ==================================================================== -->
-    <div id="librarian-settings-modal" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
+    <div id="librarian-settings-modal" aria-hidden="true" class="fixed inset-0 modal-overlay z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-200 p-4">
         <div class="modal-content bg-paper border border-wood rounded-2xl shadow-2xl max-w-xl w-full overflow-hidden flex flex-col max-h-[90vh]">
             <!-- Header -->
             <div class="px-6 py-4 bg-clay border-b border-wood flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-3">
                     <div class="w-9 h-9 rounded-xl bg-jungle text-white flex items-center justify-center shadow-xs">
-                        <i class="ph ph-gear text-xl"></i>
+                        <i class="ph ph-gear text-xl" aria-hidden="true"></i>
                     </div>
                     <div>
                         <h2 class="font-serif font-bold text-base text-soil" data-i18n="settings.modalTitle">Configurações do Lexicon</h2>
                         <p class="text-xs text-earth" data-i18n="settings.modalSubtitle">Preferências do sistema, idioma e IA local</p>
                     </div>
                 </div>
-                <button onclick="closeModal('librarian-settings-modal')" class="text-earth hover:text-soil transition-colors p-2 rounded-xl hover:bg-wood/40 cursor-pointer" data-i18n-title="common.closeEsc" title="Close (Esc)">
-                    <i class="ph ph-x text-xl"></i>
+                <button data-lx-click="closeModal" data-lx-args='["librarian-settings-modal"]' class="text-earth hover:text-soil transition-colors p-2 rounded-xl hover:bg-wood/40 cursor-pointer" data-i18n-title="common.closeEsc" title="Close (Esc)" aria-label="common.closeEsc">
+                    <i class="ph ph-x text-xl" aria-hidden="true"></i>
                 </button>
             </div>
 
             <!-- Tab Navigation Header -->
             <div class="flex border-b border-wood bg-sand/30 px-6 pt-2 gap-1 shrink-0">
-                <button type="button" class="settings-tab-btn px-4 py-2 text-xs font-semibold border-b-2 border-jungle text-jungle transition-all flex items-center gap-2 cursor-pointer" data-tab="general" onclick="Lexicon.App.switchSettingsTab('general')">
-                    <i class="ph ph-translate text-sm"></i>
+                <button type="button" class="settings-tab-btn px-4 py-2 text-xs font-semibold border-b-2 border-jungle text-jungle transition-all flex items-center gap-2 cursor-pointer" data-tab="general" data-lx-click="App.switchSettingsTab" data-lx-args='["general"]'>
+                    <i class="ph ph-translate text-sm" aria-hidden="true"></i>
                     <span data-i18n="settings.tabGeneral">Geral & Idioma</span>
                 </button>
-                <button type="button" class="settings-tab-btn px-4 py-2 text-xs font-semibold border-b-2 border-transparent text-earth hover:text-soil transition-all flex items-center gap-2 cursor-pointer" data-tab="ai" onclick="Lexicon.App.switchSettingsTab('ai')">
-                    <i class="ph ph-robot text-sm"></i>
+                <button type="button" class="settings-tab-btn px-4 py-2 text-xs font-semibold border-b-2 border-transparent text-earth hover:text-soil transition-all flex items-center gap-2 cursor-pointer" data-tab="ai" data-lx-click="App.switchSettingsTab" data-lx-args='["ai"]'>
+                    <i class="ph ph-robot text-sm" aria-hidden="true"></i>
                     <span data-i18n="settings.tabAI">Bibliotecário IA</span>
                 </button>
-                <button type="button" class="settings-tab-btn px-4 py-2 text-xs font-semibold border-b-2 border-transparent text-earth hover:text-soil transition-all flex items-center gap-2 cursor-pointer" data-tab="backup" onclick="Lexicon.App.switchSettingsTab('backup')">
-                    <i class="ph ph-database text-sm"></i>
+                <button type="button" class="settings-tab-btn px-4 py-2 text-xs font-semibold border-b-2 border-transparent text-earth hover:text-soil transition-all flex items-center gap-2 cursor-pointer" data-tab="backup" data-lx-click="App.switchSettingsTab" data-lx-args='["backup"]'>
+                    <i class="ph ph-database text-sm" aria-hidden="true"></i>
                     <span data-i18n="settings.tabBackup">Catálogo & Dados</span>
                 </button>
             </div>
@@ -1380,7 +1361,7 @@
                         <p class="text-xs text-earth mb-3" data-i18n="settings.languageSubtitle">Selecione o idioma utilizado na interface, notificações e nos comandos enviados aos modelos locais do Ollama.</p>
                         
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <button type="button" id="lang-card-pt" onclick="Lexicon.I18n.setLocale('pt-BR')" 
+                            <button type="button" id="lang-card-pt" data-lx-click="I18n.setLocale" data-lx-args='["pt-BR"]' 
                                     class="p-3.5 rounded-xl border-2 border-jungle bg-jungle/5 text-left flex items-start justify-between gap-3 transition-all cursor-pointer shadow-xs">
                                 <div>
                                     <div class="flex items-center gap-2 mb-1">
@@ -1390,11 +1371,11 @@
                                     <p class="text-[11px] text-earth" data-i18n="settings.langPtDesc">Interface completa e prompts acadêmicos em português</p>
                                 </div>
                                 <div class="lang-check-pt w-5 h-5 rounded-full bg-jungle text-white flex items-center justify-center shrink-0">
-                                    <i class="ph-bold ph-check text-xs"></i>
+                                    <i class="ph-bold ph-check text-xs" aria-hidden="true"></i>
                                 </div>
                             </button>
 
-                            <button type="button" id="lang-card-en" onclick="Lexicon.I18n.setLocale('en-US')" 
+                            <button type="button" id="lang-card-en" data-lx-click="I18n.setLocale" data-lx-args='["en-US"]' 
                                     class="p-3.5 rounded-xl border border-wood/80 hover:border-earth bg-paper text-left flex items-start justify-between gap-3 transition-all cursor-pointer">
                                 <div>
                                     <div class="flex items-center gap-2 mb-1">
@@ -1404,13 +1385,13 @@
                                     <p class="text-[11px] text-earth" data-i18n="settings.langEnDesc">Interface and academic prompts in English</p>
                                 </div>
                                 <div class="lang-check-en w-5 h-5 rounded-full bg-jungle text-white flex items-center justify-center shrink-0 hidden">
-                                    <i class="ph-bold ph-check text-xs"></i>
+                                    <i class="ph-bold ph-check text-xs" aria-hidden="true"></i>
                                 </div>
                             </button>
                         </div>
 
                         <!-- Hidden select for compatibility -->
-                        <select id="settings-language-select" class="hidden" onchange="Lexicon.I18n.setLocale(this.value)">
+                        <select id="settings-language-select" class="hidden" data-lx-change="I18n.setLocale" data-lx-args='["$value"]'>
                             <option value="pt-BR">Português (Brasil)</option>
                             <option value="en-US">English (US)</option>
                         </select>
@@ -1419,7 +1400,7 @@
                     <!-- Privacy & Architecture Notice -->
                     <div class="p-4 bg-sand/60 border border-wood/80 rounded-xl space-y-2">
                         <div class="flex items-center gap-2 text-xs font-bold text-soil uppercase tracking-wider">
-                            <i class="ph ph-shield-check text-base text-leaf"></i>
+                            <i class="ph ph-shield-check text-base text-leaf" aria-hidden="true"></i>
                             <span data-i18n="settings.privacyTitle">Arquitetura 100% Local-First</span>
                         </div>
                         <p class="text-xs text-earth leading-relaxed" data-i18n="settings.privacyDesc">
@@ -1441,9 +1422,9 @@
                                 </div>
                             </div>
                         </div>
-                        <button type="button" onclick="Lexicon.Librarian.checkConnection(true)" 
+                        <button type="button" data-lx-click="Librarian.checkConnection" data-lx-args='[true]' 
                                 class="px-3 py-1.5 bg-paper hover:bg-white border border-wood rounded-lg text-xs font-semibold text-soil transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer">
-                            <i class="ph ph-arrow-counter-clockwise text-xs"></i>
+                            <i class="ph ph-arrow-counter-clockwise text-xs" aria-hidden="true"></i>
                             <span data-i18n="settings.testConnection">Testar Conexão</span>
                         </button>
                     </div>
@@ -1455,7 +1436,7 @@
                             <input type="text" id="librarian-endpoint-input" value="http://localhost:11434" 
                                    placeholder="http://localhost:11434"
                                    class="w-full px-3 py-2 bg-white border border-wood rounded-xl text-xs font-mono text-soil outline-none focus:border-jungle focus:ring-1 focus:ring-jungle">
-                            <p class="text-[11px] text-earth/70 mt-1">Padrão local do Ollama: <code>http://localhost:11434</code></p>
+                            <p class="text-[11px] text-earth/70 mt-1" data-i18n="settings.endpointHint">Padrão local do Ollama: http://localhost:11434 (via ./start.sh o proxy local é detectado automaticamente)</p>
                         </div>
 
                         <div>
@@ -1464,14 +1445,14 @@
                                     class="w-full px-3 py-2 bg-white border border-wood rounded-xl text-xs text-soil outline-none focus:border-jungle focus:ring-1 focus:ring-jungle font-mono cursor-pointer">
                                 <!-- Populated dynamically with local models -->
                             </select>
-                            <p class="text-[11px] text-earth/70 mt-1">Carregado dinamicamente dos modelos instalados no seu Ollama.</p>
+                            <p class="text-[11px] text-earth/70 mt-1" data-i18n="settings.modelHint">Modelos instalados no seu Ollama. Prefira modelos de instrução gerais (ex.: qwen2.5:3b, llama3.2:3b, gemma3) — modelos "coder" ou de embedding (⚠) produzem resultados ruins.</p>
                         </div>
                     </div>
 
                     <!-- 4 Mechanic Tasks Overview -->
                     <div class="p-4 bg-clay/40 border border-wood rounded-xl space-y-3">
                         <div class="text-xs font-bold text-soil uppercase tracking-wider flex items-center gap-1.5">
-                            <i class="ph ph-sparkle text-jungle text-base"></i>
+                            <i class="ph ph-sparkle text-jungle text-base" aria-hidden="true"></i>
                             <span data-i18n="settings.tasksTitle">Tarefas Mecânicas Integradas</span>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-earth">
@@ -1499,15 +1480,20 @@
                 <div id="settings-panel-backup" class="settings-tab-panel hidden space-y-4">
                     <div class="p-4 bg-sand/60 border border-wood/80 rounded-xl space-y-3">
                         <div class="text-xs font-bold text-soil uppercase tracking-wider" data-i18n="nav.backupHeader">Backup do Catálogo</div>
+                        <p id="storage-usage-info" class="text-[11px] text-earth/80 font-mono" aria-live="polite"></p>
                         <p class="text-xs text-earth" data-i18n="settings.backupDesc">Exporte todo o seu catálogo bibliográfico com notas e referências em formato JSON padronizado ou restaure um backup prévio.</p>
                         
                         <div class="flex flex-wrap gap-2 pt-1">
-                            <button type="button" onclick="Lexicon.Storage.exportJSON()" class="px-3.5 py-2 bg-paper hover:bg-white border border-wood rounded-xl text-xs font-semibold text-soil transition-colors shadow-2xs flex items-center gap-2 cursor-pointer">
-                                <i class="ph ph-export text-base text-jungle"></i>
+                            <button type="button" data-lx-click="Storage.exportJSON" class="px-3.5 py-2 bg-paper hover:bg-white border border-wood rounded-xl text-xs font-semibold text-soil transition-colors shadow-2xs flex items-center gap-2 cursor-pointer">
+                                <i class="ph ph-export text-base text-jungle" aria-hidden="true"></i>
                                 <span data-i18n="nav.exportBackup">Exportar Catálogo (.json)</span>
                             </button>
+                            <button type="button" data-lx-click="Storage.exportFullBackup" class="px-3.5 py-2 bg-paper hover:bg-white border border-wood rounded-xl text-xs font-semibold text-soil transition-colors shadow-2xs flex items-center gap-2 cursor-pointer">
+                                <i class="ph ph-file-zip text-base text-jungle" aria-hidden="true"></i>
+                                <span data-i18n="nav.exportFullBackup">Backup completo (.zip)</span>
+                            </button>
                             <label for="import-file-input" class="px-3.5 py-2 bg-paper hover:bg-white border border-wood rounded-xl text-xs font-semibold text-soil transition-colors shadow-2xs flex items-center gap-2 cursor-pointer">
-                                <i class="ph ph-import text-base text-leaf"></i>
+                                <i class="ph ph-import text-base text-leaf" aria-hidden="true"></i>
                                 <span data-i18n="nav.importBackup">Importar Catálogo</span>
                             </label>
                         </div>
@@ -1515,12 +1501,12 @@
 
                     <div class="p-4 bg-clay/50 border border-terracotta/30 rounded-xl space-y-2">
                         <div class="text-xs font-bold text-terracotta uppercase tracking-wider flex items-center gap-1.5">
-                            <i class="ph ph-warning-circle text-base"></i>
+                            <i class="ph ph-warning-circle text-base" aria-hidden="true"></i>
                             <span data-i18n="nav.resetSample">Restaurar Biblioteca de Exemplo</span>
                         </div>
                         <p class="text-xs text-earth" data-i18n="reset.warning">Substitui o banco de dados atual pelos artigos e coleções de demonstração originais.</p>
-                        <button type="button" onclick="closeModal('librarian-settings-modal'); Lexicon.Storage.openResetWizard()" class="mt-2 px-3.5 py-2 bg-paper hover:bg-terracotta/10 border border-terracotta/40 text-terracotta rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer">
-                            <i class="ph ph-arrow-counter-clockwise text-sm"></i>
+                        <button type="button" data-lx-click="App.closeSettingsAndOpenReset" class="mt-2 px-3.5 py-2 bg-paper hover:bg-terracotta/10 border border-terracotta/40 text-terracotta rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer">
+                            <i class="ph ph-arrow-counter-clockwise text-sm" aria-hidden="true"></i>
                             <span data-i18n="nav.resetSample">Iniciar Restauração de Exemplo...</span>
                         </button>
                     </div>
@@ -1531,10 +1517,10 @@
             <div class="px-6 py-4 bg-clay border-t border-wood flex items-center justify-between shrink-0">
                 <span class="text-xs text-earth/70" data-i18n="settings.localPrivate">100% Local & Privativo</span>
                 <div class="flex items-center gap-2">
-                    <button type="button" onclick="closeModal('librarian-settings-modal')" class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">
+                    <button type="button" data-lx-click="closeModal" data-lx-args='["librarian-settings-modal"]' class="px-4 py-2 text-xs font-medium text-earth hover:text-soil transition-colors cursor-pointer" data-i18n="common.cancel">
                         Cancelar
                     </button>
-                    <button type="button" onclick="Lexicon.Librarian.saveSettings()" class="px-4 py-2 bg-jungle hover:bg-canopy text-white rounded-xl text-xs font-semibold transition-colors shadow-xs cursor-pointer" data-i18n="settings.saveSettings">
+                    <button type="button" data-lx-click="Librarian.saveSettings" class="px-4 py-2 bg-jungle hover:bg-canopy text-white rounded-xl text-xs font-semibold transition-colors shadow-xs cursor-pointer" data-i18n="settings.saveSettings">
                         Salvar Configurações
                     </button>
                 </div>
@@ -1543,22 +1529,10 @@
     </div>
 
     <!-- ==================================================================== -->
-    <!-- NOTIFICATION TOAST                                                   -->
-    <!-- ==================================================================== -->
-    <div id="toast" class="fixed bottom-6 right-6 bg-soil border border-wood rounded-xl shadow-2xl p-4 flex items-center gap-3 transform translate-y-20 opacity-0 transition-all duration-300 z-50">
-        <div class="w-8 h-8 rounded-full bg-jungle/20 flex items-center justify-center text-leaf" id="toast-icon">
-            <i class="ph ph-check-circle text-xl"></i>
-        </div>
-        <div>
-            <p class="text-sm font-semibold text-white" id="toast-message">Success</p>
-        </div>
-    </div>
-
-    <!-- ==================================================================== -->
     <!-- JAVASCRIPT MODULES                                                   -->
     <!-- ==================================================================== -->
     <!-- Vendor Libraries (Zero-build local offline) -->
-    <script src="js/vendor/pdf.min.js"></script>
+    <script type="module" src="js/pdf-loader.mjs"></script>
     <script src="js/vendor/jszip.min.js"></script>
     <script src="js/vendor/epub.min.js"></script>
 

@@ -6,163 +6,182 @@
 window.Lexicon = window.Lexicon || {};
 
 (function() {
+    const PAGE_SIZE = 200;
+    const UNFILED_KEY = '\u0000__unfiled__';
+    const VALID_STATUS = ['inbox', 'reading', 'processing', 'archived'];
+    const SUPPORTED_EXTS = ['pdf', 'epub', 'doc', 'docx', 'txt', 'md', 'mobi', 'djvu'];
+    const RENDERABLE_EXTS = ['pdf', 'epub', 'txt', 'md'];
+
+    const U = () => window.Lexicon.Utils;
+    const esc = (s) => U().escapeHTML(s);
+    const disp = (v, f) => U().display(v, f);
+    const tr = (k, f, p) => U().tr(k, f, p);
+    const toast = (m, t) => window.Lexicon.UI.Toast.show(m, t);
+    const L = () => window.Lexicon;
+
+    /** Cache of the last PDF extraction done in the "Add document" form */
+    let formExtraction = null; // { file, result }
+
+    function fileTypeIcon(article) {
+        const ext = U().fileExt(article.fileName);
+        if (article.coverType === 'book' || ext === 'epub' || ext === 'mobi') return 'ph-book-bookmark text-terracotta';
+        if (article.coverType === 'doc' || ext === 'doc' || ext === 'docx') return 'ph-file-doc text-jungle';
+        if (ext === 'txt' || ext === 'md') return 'ph-file-text text-jungle';
+        return 'ph-file-pdf text-terracotta';
+    }
+
+    function searchHaystack(a) {
+        return U().fold([
+            a.title, a.authors, a.summary, a.notes, a.fileName, a.publication, a.doi,
+            (a.tags || []).join(' ')
+        ].join('\u0001'));
+    }
+
+    function filterSignature(state) {
+        return JSON.stringify([state.currentFilter, state.activeTag, state.searchQuery, state.semanticFilter, state.sortBy, state.viewMode]);
+    }
+
     window.Lexicon.Articles = {
+        renderLimit: PAGE_SIZE,
+        _lastSignature: '',
+
         /**
          * Initialize central event delegation for articles container and modals
          */
         init() {
-            // 1. Container delegation for cards, rows, tags, folders, favorites, selections, read
+            if (this._initialized) return;
+            this._initialized = true;
+
             const container = document.getElementById('articles-container');
-            if (container && !container._hasDelegation) {
-                container._hasDelegation = true;
-                container.addEventListener('click', (e) => {
-                    // Tag filter
-                    const tagChip = e.target.closest('[data-action="filter-tag"]');
-                    if (tagChip) {
-                        e.stopPropagation();
-                        const tag = tagChip.dataset.tagName;
-                        if (tag) this.filterByTag(tag);
-                        return;
-                    }
-
-                    // Favorite button
-                    const favBtn = e.target.closest('[data-action="toggle-favorite"]');
-                    if (favBtn) {
-                        e.stopPropagation();
-                        const id = Number(favBtn.dataset.articleId);
-                        if (id) this.toggleFavorite(id);
-                        return;
-                    }
-
-                    // Select checkbox
-                    const selectBox = e.target.closest('[data-action="toggle-select"]');
-                    if (selectBox) {
-                        e.stopPropagation();
-                        const id = Number(selectBox.dataset.articleId);
-                        if (id) this.toggleSelect(id);
-                        return;
-                    }
-
-                    // Read document
-                    const readBtn = e.target.closest('[data-action="read-article"]');
-                    if (readBtn) {
-                        e.stopPropagation();
-                        const id = Number(readBtn.dataset.articleId);
-                        if (id) {
-                            window.Lexicon.State.inspectedArticleId = id;
-                            this.openDocumentForReading();
-                        }
-                        return;
-                    }
-
-                    // Folder toggles and actions
-                    const folderToggle = e.target.closest('[data-action="toggle-folder-expand"]');
-                    if (folderToggle) {
-                        e.stopPropagation();
-                        const folderName = folderToggle.dataset.folderName;
-                        if (folderName) this.toggleFolderExpand(folderName);
-                        return;
-                    }
-
-                    const folderAdd = e.target.closest('[data-action="add-folder-doc"]');
-                    if (folderAdd) {
-                        e.stopPropagation();
-                        const folderName = folderAdd.dataset.folderName;
-                        if (folderName) this.openAddModalForCollection(folderName);
-                        return;
-                    }
-
-                    const folderSelect = e.target.closest('[data-action="select-folder"]');
-                    if (folderSelect) {
-                        e.stopPropagation();
-                        const folderName = folderSelect.dataset.folderName;
-                        if (folderName && window.Lexicon.Collections) window.Lexicon.Collections.select(folderName);
-                        return;
-                    }
-
-                    const folderDelete = e.target.closest('[data-action="delete-folder"]');
-                    if (folderDelete) {
-                        e.stopPropagation();
-                        const id = folderDelete.dataset.folderId;
-                        const name = folderDelete.dataset.folderName;
-                        if (id && name && window.Lexicon.Collections) window.Lexicon.Collections.deleteCollection(id, name);
-                        return;
-                    }
-
-                    const toggleAll = e.target.closest('[data-action="toggle-all-folders"]');
-                    if (toggleAll) {
-                        e.stopPropagation();
-                        const expand = toggleAll.dataset.expand === 'true';
-                        this.toggleAllFolders(expand);
-                        return;
-                    }
-
-                    const createCol = e.target.closest('[data-action="create-collection-modal"]');
-                    if (createCol) {
-                        e.stopPropagation();
-                        if (window.Lexicon.Collections) window.Lexicon.Collections.openCreateModal();
-                        return;
-                    }
-
-                    // Card or row click -> inspect article
-                    const articleItem = e.target.closest('[data-action="inspect-article"]');
-                    if (articleItem) {
-                        const id = Number(articleItem.dataset.articleId);
-                        if (id) this.inspect(id);
-                        return;
+            if (container) {
+                container.addEventListener('click', (e) => this._handleContainerAction(e));
+                container.addEventListener('keydown', (e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    const el = e.target.closest('[data-action="inspect-article"], [data-action="toggle-folder-expand"]');
+                    if (el && el === e.target) {
+                        e.preventDefault();
+                        el.click();
                     }
                 });
             }
 
-            // 2. Inspector tags list delegation
             const tagsList = document.getElementById('inspector-tags-list');
-            if (tagsList && !tagsList._hasDelegation) {
-                tagsList._hasDelegation = true;
+            if (tagsList) {
                 tagsList.addEventListener('click', (e) => {
                     const removeBtn = e.target.closest('[data-action="remove-inspected-tag"]');
                     if (removeBtn) {
                         e.stopPropagation();
                         const tag = removeBtn.dataset.tagName;
                         if (tag) this.removeTagFromInspected(tag);
-                        return;
                     }
                 });
             }
 
-            // 3. Staged multi-upload preview list delegation
-            const stagedList = document.getElementById('multi-file-preview');
-            if (stagedList && !stagedList._hasDelegation) {
-                stagedList._hasDelegation = true;
+            const stagedList = document.getElementById('staged-files-list') || document.getElementById('multi-file-preview');
+            if (stagedList) {
                 stagedList.addEventListener('click', (e) => {
                     const removeBtn = e.target.closest('[data-action="remove-staged-file"]');
                     if (removeBtn) {
                         e.stopPropagation();
                         const idx = Number(removeBtn.dataset.index);
                         if (!isNaN(idx)) this.removeStagedFile(idx);
-                        return;
                     }
                 });
             }
 
-            // 4. Active filter banner delegation
             const banner = document.getElementById('active-filter-banner');
-            if (banner && !banner._hasDelegation) {
-                banner._hasDelegation = true;
+            if (banner) {
                 banner.addEventListener('click', (e) => {
-                    const clearSem = e.target.closest('[data-action="clear-semantic-filter"]');
-                    if (clearSem) {
-                        e.stopPropagation();
-                        if (window.Lexicon.Librarian) window.Lexicon.Librarian.clearSemanticFilter();
-                        return;
-                    }
-
-                    const clearTag = e.target.closest('[data-action="clear-tag-filter"]');
-                    if (clearTag) {
-                        e.stopPropagation();
-                        this.clearTagFilter();
-                        return;
-                    }
+                    const actionEl = e.target.closest('[data-action]');
+                    if (!actionEl) return;
+                    e.stopPropagation();
+                    if (actionEl.dataset.action === 'clear-semantic-filter' && L().Librarian) L().Librarian.clearSemanticFilter();
+                    if (actionEl.dataset.action === 'clear-tag-filter') this.clearTagFilter();
                 });
+            }
+
+            // Inspector: unsaved metadata edits are not silently discarded
+            const Modal = L().UI.Modal;
+            Modal.beforeClose('inspector-modal', () => {
+                this.flushNotesSave();
+                if (this._skipDirtyCheck) {
+                    this._skipDirtyCheck = false;
+                    return true;
+                }
+                if (this.isInspectorDirty()) {
+                    if (window.confirm(tr('inspector.confirmSaveOnClose', 'Salvar as alterações feitas neste documento antes de fechar?\n\nOK = salvar • Cancelar = descartar'))) {
+                        this.saveInspected({ silent: true });
+                    }
+                }
+                return true;
+            });
+        },
+
+        _handleContainerAction(e) {
+            const el = e.target.closest('[data-action]');
+            if (!el) return;
+            const action = el.dataset.action;
+            const id = Number(el.dataset.articleId);
+            const folderName = el.dataset.folderName;
+
+            switch (action) {
+                case 'noop':
+                    return;
+                case 'filter-tag':
+                    e.stopPropagation();
+                    if (el.dataset.tagName) this.filterByTag(el.dataset.tagName);
+                    return;
+                case 'toggle-favorite':
+                    e.stopPropagation();
+                    if (id) this.toggleFavorite(id);
+                    return;
+                case 'toggle-select':
+                    e.stopPropagation();
+                    if (id) this.toggleSelect(id);
+                    return;
+                case 'toggle-select-all':
+                    e.stopPropagation();
+                    this.toggleSelectAll(el.checked);
+                    return;
+                case 'read-article':
+                    e.stopPropagation();
+                    if (id) this.openDocumentForReading(id);
+                    return;
+                case 'toggle-folder-expand':
+                    e.stopPropagation();
+                    if (folderName) this.toggleFolderExpand(folderName);
+                    return;
+                case 'add-folder-doc':
+                    e.stopPropagation();
+                    if (folderName) this.openAddModalForCollection(folderName);
+                    return;
+                case 'select-folder':
+                    e.stopPropagation();
+                    if (folderName === UNFILED_KEY) this.filterUnfiled();
+                    else if (folderName) L().Collections.select(folderName);
+                    return;
+                case 'delete-folder':
+                    e.stopPropagation();
+                    if (el.dataset.folderId && folderName) L().Collections.deleteCollection(el.dataset.folderId, folderName);
+                    return;
+                case 'toggle-all-folders':
+                    e.stopPropagation();
+                    this.toggleAllFolders(el.dataset.expand === 'true');
+                    return;
+                case 'create-collection-modal':
+                    e.stopPropagation();
+                    L().Collections.openCreateModal();
+                    return;
+                case 'show-more':
+                    e.stopPropagation();
+                    this.renderLimit += PAGE_SIZE;
+                    this.render({ keepLimit: true });
+                    return;
+                case 'inspect-article':
+                    if (id) this.inspect(id);
+                    return;
+                default:
+                    return;
             }
         },
 
@@ -171,115 +190,97 @@ window.Lexicon = window.Lexicon || {};
          */
         getFilteredArticles() {
             const state = window.Lexicon.State;
-            let list = [...state.articles];
+            let list = state.articles.slice();
 
-            // 1. Filter by category / status / collection
             if (state.currentFilter.type === 'category') {
                 const filter = state.currentFilter.value;
-                if (filter === 'inbox') {
-                    list = list.filter(a => a.status === 'inbox');
-                } else if (filter === 'reading') {
-                    list = list.filter(a => a.status === 'reading');
-                } else if (filter === 'processing') {
-                    list = list.filter(a => a.status === 'processing');
+                if (VALID_STATUS.includes(filter)) {
+                    list = list.filter(a => a.status === filter);
                 } else if (filter === 'favorites') {
                     list = list.filter(a => a.isFavorite);
-                } else if (filter === 'archived') {
-                    list = list.filter(a => a.status === 'archived');
                 } else if (filter === 'recent') {
-                    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-                    list = list.filter(a => new Date(a.addedDate || 0) >= sevenDaysAgo);
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setHours(0, 0, 0, 0);
+                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                    list = list.filter(a => {
+                        const d = U().parseLocalDate(a.addedDate);
+                        return d && d >= sevenDaysAgo;
+                    });
                 }
             } else if (state.currentFilter.type === 'collection') {
                 const colName = state.currentFilter.value;
                 list = list.filter(a => a.collection === colName);
+            } else if (state.currentFilter.type === 'unfiled') {
+                const known = new Set(state.collections.map(c => c.name));
+                list = list.filter(a => !a.collection || !known.has(a.collection));
             }
 
-            // 2. Filter by active tag
             if (state.activeTag) {
-                list = list.filter(a => Array.isArray(a.tags) && a.tags.includes(state.activeTag));
+                const tagLower = String(state.activeTag).toLowerCase();
+                list = list.filter(a => Array.isArray(a.tags) && a.tags.some(t => String(t).toLowerCase() === tagLower));
             }
 
-            // 2.5 Filter by AI Semantic Filter (Librarian Agent)
             if (state.semanticFilter) {
                 const sf = state.semanticFilter;
-                
-                // Status filtering
                 if (sf.status) {
                     if (sf.status === 'favorites') {
                         list = list.filter(a => a.isFavorite);
-                    } else if (sf.status === 'archived') {
-                        // Interpreting "que li" / lidos: covers archived and reading
-                        list = list.filter(a => a.status === 'archived' || a.status === 'reading');
+                    } else if (sf.status === 'recent') {
+                        const cutoff = new Date();
+                        cutoff.setDate(cutoff.getDate() - 30);
+                        list = list.filter(a => {
+                            const d = U().parseLocalDate(a.addedDate);
+                            return d && d >= cutoff;
+                        });
                     } else {
                         list = list.filter(a => a.status === sf.status);
                     }
                 }
-
-                // Year filtering
-                if (sf.year) {
-                    list = list.filter(a => Number(a.year) === Number(sf.year));
-                }
-
-                // Collection filtering
+                if (sf.year) list = list.filter(a => Number(a.year) === Number(sf.year));
                 if (sf.collection) {
-                    const colQ = sf.collection.toLowerCase();
-                    list = list.filter(a => (a.collection || '').toLowerCase().includes(colQ));
+                    const colQ = String(sf.collection).toLowerCase();
+                    list = list.filter(a => (a.collection || '').toLowerCase() === colQ);
                 }
-
-                // Tag filtering
                 if (sf.tag) {
-                    const tagQ = sf.tag.toLowerCase();
-                    list = list.filter(a => Array.isArray(a.tags) && a.tags.some(t => t.toLowerCase() === tagQ));
+                    const tagQ = String(sf.tag).toLowerCase();
+                    list = list.filter(a => Array.isArray(a.tags) && a.tags.some(t => String(t).toLowerCase() === tagQ));
                 }
-
-                // Text query filtering
                 if (sf.textQuery) {
-                    const q = sf.textQuery.toLowerCase();
+                    const terms = U().fold(sf.textQuery).split(/\s+/).filter(Boolean);
                     list = list.filter(a => {
-                        const titleMatch = (a.title || '').toLowerCase().includes(q);
-                        const authorMatch = (a.authors || '').toLowerCase().includes(q);
-                        const summaryMatch = (a.summary || '').toLowerCase().includes(q);
-                        const notesMatch = (a.notes || '').toLowerCase().includes(q);
-                        const fileMatch = (a.fileName || '').toLowerCase().includes(q);
-                        const pubMatch = (a.publication || '').toLowerCase().includes(q);
-                        const doiMatch = (a.doi || '').toLowerCase().includes(q);
-                        const tagsMatch = (a.tags || []).some(t => t.toLowerCase().includes(q));
-                        return titleMatch || authorMatch || summaryMatch || notesMatch || fileMatch || pubMatch || doiMatch || tagsMatch;
+                        const hay = searchHaystack(a);
+                        return terms.every(t => hay.includes(t));
                     });
                 }
             }
 
-            // 3. Filter by search query (multi-field search)
             if (state.searchQuery) {
-                const q = state.searchQuery.toLowerCase();
+                const terms = U().fold(state.searchQuery).split(/\s+/).filter(Boolean);
                 list = list.filter(a => {
-                    const titleMatch = (a.title || '').toLowerCase().includes(q);
-                    const authorMatch = (a.authors || '').toLowerCase().includes(q);
-                    const summaryMatch = (a.summary || '').toLowerCase().includes(q);
-                    const notesMatch = (a.notes || '').toLowerCase().includes(q);
-                    const fileMatch = (a.fileName || '').toLowerCase().includes(q);
-                    const pubMatch = (a.publication || '').toLowerCase().includes(q);
-                    const doiMatch = (a.doi || '').toLowerCase().includes(q);
-                    const tagsMatch = (a.tags || []).some(t => t.toLowerCase().includes(q));
-                    return titleMatch || authorMatch || summaryMatch || notesMatch || fileMatch || pubMatch || doiMatch || tagsMatch;
+                    const hay = searchHaystack(a);
+                    return terms.every(t => hay.includes(t));
                 });
             }
 
-            // 4. Sort documents
+            const dateVal = (a) => {
+                const d = U().parseLocalDate(a.addedDate);
+                return d ? d.getTime() : 0;
+            };
             switch (state.sortBy) {
                 case 'date-asc':
-                    list.sort((a, b) => new Date(a.addedDate || 0) - new Date(b.addedDate || 0));
+                    list.sort((a, b) => dateVal(a) - dateVal(b) || a.id - b.id);
                     break;
-                case 'title-asc':
-                    list.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+                case 'title-asc': {
+                    const collator = new Intl.Collator((L().I18n && L().I18n.locale) || 'pt-BR', { sensitivity: 'base', numeric: true });
+                    list.sort((a, b) => collator.compare(a.title || '', b.title || ''));
                     break;
+                }
                 case 'year-desc':
-                    list.sort((a, b) => (b.year || 0) - (a.year || 0));
+                    list.sort((a, b) => (b.year || 0) - (a.year || 0) || dateVal(b) - dateVal(a));
                     break;
                 case 'date-desc':
                 default:
-                    list.sort((a, b) => new Date(b.addedDate || 0) - new Date(a.addedDate || 0));
+                    list.sort((a, b) => dateVal(b) - dateVal(a) || b.id - a.id);
                     break;
             }
 
@@ -288,93 +289,102 @@ window.Lexicon = window.Lexicon || {};
 
         /**
          * Render the document cards or table view
+         * @param {{keepLimit?: boolean}} [opts]
          */
-        render() {
+        render(opts = {}) {
             const state = window.Lexicon.State;
-            const articles = this.getFilteredArticles();
-
             const container = document.getElementById('articles-container');
             const emptyState = document.getElementById('empty-state');
             const viewTitle = document.getElementById('current-view-title');
             const viewCount = document.getElementById('current-view-count');
             const activeFilterBanner = document.getElementById('active-filter-banner');
+            if (!container || !viewTitle || !viewCount) return;
 
-            if (!container) return;
+            // Drop selections that no longer exist
+            if (state.selectedIds && state.selectedIds.length) {
+                const ids = new Set(state.articles.map(a => a.id));
+                state.selectedIds = state.selectedIds.filter(id => ids.has(id));
+            }
 
-            // Check if viewing "Collections & Folders" workflow view
+            const signature = filterSignature(state);
+            if (!opts.keepLimit && signature !== this._lastSignature) this.renderLimit = PAGE_SIZE;
+            this._lastSignature = signature;
+
+            const finish = () => {
+                this.updateBatchBar();
+                if (L().Navigation) {
+                    L().Navigation.updateButtons();
+                    L().Navigation.updateActiveSidebarLink();
+                }
+            };
+
+            const hideBanner = () => {
+                if (activeFilterBanner) {
+                    activeFilterBanner.classList.add('hidden');
+                    activeFilterBanner.innerHTML = '';
+                }
+            };
+
             if (state.currentFilter.type === 'category' && state.currentFilter.value === 'collections') {
-                if (activeFilterBanner) {
-                    activeFilterBanner.classList.add('hidden');
-                    activeFilterBanner.innerHTML = '';
-                }
+                hideBanner();
                 this.renderFoldersView(container, emptyState, viewTitle, viewCount);
-                this.updateBatchBar();
-                if (window.Lexicon.Navigation) {
-                    window.Lexicon.Navigation.updateButtons();
-                    window.Lexicon.Navigation.updateActiveSidebarLink();
-                }
+                finish();
                 return;
             }
 
-            // Check if viewing "Estatísticas & Insights" (Dashboard)
             if (state.currentFilter.type === 'category' && state.currentFilter.value === 'stats') {
-                if (activeFilterBanner) {
-                    activeFilterBanner.classList.add('hidden');
-                    activeFilterBanner.innerHTML = '';
+                hideBanner();
+                if (emptyState) {
+                    emptyState.classList.add('hidden');
+                    emptyState.classList.remove('flex');
                 }
-                this.updateBatchBar();
                 container.className = 'w-full block';
-                if (window.Lexicon.Dashboard) {
-                    window.Lexicon.Dashboard.render(container, emptyState, viewTitle, viewCount);
-                }
-                if (window.Lexicon.Navigation) {
-                    window.Lexicon.Navigation.updateButtons();
-                    window.Lexicon.Navigation.updateActiveSidebarLink();
-                }
+                if (L().Dashboard) L().Dashboard.render(container, emptyState, viewTitle, viewCount);
+                finish();
                 return;
             }
 
-            // Update View Title
-            const i18n = window.Lexicon.I18n;
+            const articles = this.getFilteredArticles();
+
             if (state.semanticFilter) {
-                const semTitle = i18n ? i18n.t('search.semanticTitle') : 'Busca Semântica';
-                viewTitle.textContent = `${semTitle}: "${state.semanticFilter.originalQuery}"`;
+                viewTitle.textContent = `${tr('search.semanticTitle', 'Busca Semântica')}: "${state.semanticFilter.originalQuery}"`;
             } else if (state.searchQuery) {
-                const sTitle = i18n ? i18n.t('search.title') : 'Search';
-                viewTitle.textContent = `${sTitle}: "${state.searchQuery}"`;
+                viewTitle.textContent = `${tr('search.title', 'Search')}: "${state.searchQuery}"`;
             } else if (state.activeTag) {
-                const tagTitle = i18n ? i18n.t('search.tagTitle') : 'Tag';
-                viewTitle.textContent = `${tagTitle}: #${state.activeTag}`;
+                viewTitle.textContent = `${tr('search.tagTitle', 'Tag')}: #${state.activeTag}`;
+            } else if (state.currentFilter.type === 'category') {
+                viewTitle.textContent = tr(`nav.${state.currentFilter.value}`, state.currentFilter.title || 'Documents');
+            } else if (state.currentFilter.type === 'unfiled') {
+                viewTitle.textContent = tr('folders.unfiled', 'Sem coleção');
             } else {
-                if (state.currentFilter.type === 'category' && i18n) {
-                    viewTitle.textContent = i18n.t(`nav.${state.currentFilter.value}`) || state.currentFilter.title;
-                } else {
-                    viewTitle.textContent = state.currentFilter.title || (i18n ? i18n.t('nav.all') : 'All Documents');
-                }
+                viewTitle.textContent = state.currentFilter.title || tr('nav.all', 'All Documents');
             }
 
-            const docWord = articles.length === 1 ? (i18n ? i18n.t('common.document') : 'document') : (i18n ? i18n.t('common.documents') : 'documents');
+            const docWord = articles.length === 1 ? tr('common.document', 'document') : tr('common.documents', 'documents');
             viewCount.textContent = `${articles.length} ${docWord}`;
 
-            // Active filter banner (Semantic AI or Tag)
             if (activeFilterBanner) {
                 if (state.semanticFilter) {
                     const sf = state.semanticFilter;
+                    const statusLabel = sf.status === 'favorites' ? tr('nav.favorites', 'Favorites')
+                        : sf.status === 'recent' ? tr('nav.recent', 'Recent')
+                        : sf.status ? this.getStatusLabel(sf.status) : '';
+                    const chip = (content) => `<span class="px-2 py-0.5 bg-paper border border-wood rounded text-[11px] text-soil font-medium">${content}</span>`;
                     activeFilterBanner.classList.remove('hidden');
                     activeFilterBanner.innerHTML = `
-                        <div class="flex flex-wrap items-center gap-2 px-3.5 py-2 bg-jungle/10 border border-jungle/20 rounded-xl text-xs text-soil w-full">
+                        <div class="flex flex-wrap items-center gap-2 px-3.5 py-2 bg-jungle/10 border border-jungle/20 rounded-xl text-xs text-soil w-full" role="status">
                             <div class="flex items-center gap-1.5 font-semibold text-canopy shrink-0">
-                                <i class="ph ph-robot text-base text-jungle"></i>
-                                <span>Bibliotecário IA:</span>
+                                <i class="ph ph-robot text-base text-jungle" aria-hidden="true"></i>
+                                <span>${esc(tr('search.aiLibrarian', 'Bibliotecário IA'))}:</span>
                             </div>
-                            <span class="text-earth/90 italic">"${window.Lexicon.Utils.escapeHTML(sf.originalQuery)}"</span>
-                            ${sf.year ? `<span class="px-2 py-0.5 bg-paper border border-wood rounded text-[11px] font-mono text-soil font-medium">Ano: ${window.Lexicon.Utils.escapeHTML(sf.year)}</span>` : ''}
-                            ${sf.status ? `<span class="px-2 py-0.5 bg-paper border border-wood rounded text-[11px] text-soil font-medium capitalize">Status: ${sf.status === 'archived' ? 'Lidos / Arquivados' : sf.status}</span>` : ''}
-                            ${sf.tag ? `<span class="px-2 py-0.5 bg-paper border border-wood rounded text-[11px] text-soil font-medium">#${window.Lexicon.Utils.escapeHTML(sf.tag)}</span>` : ''}
-                            ${sf.collection ? `<span class="px-2 py-0.5 bg-paper border border-wood rounded text-[11px] text-soil font-medium">Coleção: ${window.Lexicon.Utils.escapeHTML(sf.collection)}</span>` : ''}
-                            ${sf.textQuery ? `<span class="px-2 py-0.5 bg-paper border border-wood rounded text-[11px] text-soil font-medium">Termo: "${window.Lexicon.Utils.escapeHTML(sf.textQuery)}"</span>` : ''}
+                            <span class="text-earth/90 italic">"${esc(sf.originalQuery)}"</span>
+                            ${sf.year ? chip(`${esc(tr('search.chipYear', 'Ano'))}: ${esc(sf.year)}`) : ''}
+                            ${statusLabel ? chip(`${esc(tr('search.chipStatus', 'Status'))}: ${esc(statusLabel)}`) : ''}
+                            ${sf.tag ? chip(`#${esc(sf.tag)}`) : ''}
+                            ${sf.collection ? chip(`${esc(tr('search.chipCollection', 'Coleção'))}: ${esc(sf.collection)}`) : ''}
+                            ${sf.textQuery ? chip(`${esc(tr('search.chipTerm', 'Termo'))}: "${esc(sf.textQuery)}"`) : ''}
                             <button type="button" data-action="clear-semantic-filter" class="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-terracotta hover:underline shrink-0 cursor-pointer">
-                                <i class="ph ph-x-circle text-sm"></i> ${i18n ? i18n.t('search.clearSemantic') : 'Limpar Filtro IA'}
+                                <i class="ph ph-x-circle text-sm" aria-hidden="true"></i> ${esc(tr('search.clearSemantic', 'Limpar Filtro IA'))}
                             </button>
                         </div>
                     `;
@@ -382,26 +392,23 @@ window.Lexicon = window.Lexicon || {};
                     activeFilterBanner.classList.remove('hidden');
                     activeFilterBanner.innerHTML = `
                         <div class="inline-flex items-center gap-2 px-3 py-1 bg-jungle/10 border border-jungle/20 text-canopy rounded-lg text-xs font-medium">
-                            <span>${i18n ? i18n.t('search.filteringByTag') : 'Filtering by tag:'} <strong>#${window.Lexicon.Utils.escapeHTML(state.activeTag)}</strong></span>
-                            <button type="button" data-action="clear-tag-filter" class="hover:text-terracotta p-0.5 cursor-pointer"><i class="ph-bold ph-x"></i></button>
+                            <span>${esc(tr('search.filteringByTag', 'Filtering by tag:'))} <strong>#${esc(state.activeTag)}</strong></span>
+                            <button type="button" data-action="clear-tag-filter" class="hover:text-terracotta p-0.5 cursor-pointer" aria-label="${esc(tr('search.clearTag', 'Remover filtro de tag'))}"><i class="ph-bold ph-x" aria-hidden="true"></i></button>
                         </div>
                     `;
                 } else {
-                    activeFilterBanner.classList.add('hidden');
-                    activeFilterBanner.innerHTML = '';
+                    hideBanner();
                 }
             }
 
             if (articles.length === 0) {
                 container.innerHTML = '';
+                container.className = '';
                 if (emptyState) {
                     emptyState.classList.remove('hidden');
                     emptyState.classList.add('flex');
                 }
-                if (window.Lexicon.Navigation) {
-                    window.Lexicon.Navigation.updateButtons();
-                    window.Lexicon.Navigation.updateActiveSidebarLink();
-                }
+                finish();
                 return;
             }
 
@@ -410,19 +417,24 @@ window.Lexicon = window.Lexicon || {};
                 emptyState.classList.remove('flex');
             }
 
+            const visible = articles.slice(0, this.renderLimit);
+            const remaining = articles.length - visible.length;
+            const moreBtn = remaining > 0 ? `
+                <div class="col-span-full flex justify-center pt-2">
+                    <button type="button" data-action="show-more" class="px-4 py-2 bg-paper border border-wood rounded-xl text-xs font-semibold text-soil hover:bg-clay/50 cursor-pointer">
+                        ${esc(tr('common.showMore', 'Mostrar mais ({count} restantes)', { count: remaining }))}
+                    </button>
+                </div>` : '';
+
             if (state.viewMode === 'table') {
                 container.className = 'flex flex-col gap-2 pb-24';
-                container.innerHTML = this.renderTable(articles);
+                container.innerHTML = this.renderTable(visible, articles) + moreBtn;
             } else {
                 container.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-24';
-                container.innerHTML = articles.map(a => this.createCardHtml(a)).join('');
+                container.innerHTML = visible.map(a => this.createCardHtml(a)).join('') + moreBtn;
             }
 
-            this.updateBatchBar();
-            if (window.Lexicon.Navigation) {
-                window.Lexicon.Navigation.updateButtons();
-                window.Lexicon.Navigation.updateActiveSidebarLink();
-            }
+            finish();
         },
 
         /**
@@ -430,18 +442,16 @@ window.Lexicon = window.Lexicon || {};
          */
         renderFoldersView(container, emptyState, viewTitle, viewCount) {
             const state = window.Lexicon.State;
-            const i18n = window.Lexicon.I18n;
+            const unfiledLabel = tr('folders.unfiled', 'Sem coleção');
 
-            // Initialize expandedFolders if needed
             if (!Array.isArray(state.expandedFolders)) {
                 state.expandedFolders = state.collections.map(c => c.name);
-                state.expandedFolders.push('Unfiled / General');
+                state.expandedFolders.push(UNFILED_KEY);
             }
 
-            // Update title and stats
-            viewTitle.textContent = i18n ? i18n.t('folders.title') : 'Collections & Folders';
-            const docWord = state.articles.length === 1 ? (i18n ? i18n.t('common.document') : 'document') : (i18n ? i18n.t('common.documents') : 'documents');
-            const colWord = state.collections.length === 1 ? (i18n && i18n.locale === 'pt-BR' ? 'coleção' : 'collection') : (i18n && i18n.locale === 'pt-BR' ? 'coleções' : 'collections');
+            viewTitle.textContent = tr('folders.title', 'Coleções & Pastas');
+            const docWord = state.articles.length === 1 ? tr('common.document', 'document') : tr('common.documents', 'documents');
+            const colWord = state.collections.length === 1 ? tr('common.collection', 'coleção') : tr('common.collectionsLower', 'coleções');
             viewCount.textContent = `${state.collections.length} ${colWord} • ${state.articles.length} ${docWord}`;
 
             if (emptyState) {
@@ -449,39 +459,26 @@ window.Lexicon = window.Lexicon || {};
                 emptyState.classList.remove('flex');
             }
 
-            // Map articles by collection
-            const articlesByCol = {};
-            state.collections.forEach(c => { articlesByCol[c.name] = []; });
-            articlesByCol['Unfiled / General'] = [];
+            const articlesByCol = new Map(state.collections.map(c => [c.name, []]));
+            articlesByCol.set(UNFILED_KEY, []);
 
-            const q = (state.searchQuery || '').toLowerCase();
+            const terms = U().fold(state.searchQuery || '').split(/\s+/).filter(Boolean);
 
             state.articles.forEach(a => {
-                // Apply search filter if present
-                if (q) {
-                    const match = (a.title || '').toLowerCase().includes(q) ||
-                                  (a.authors || '').toLowerCase().includes(q) ||
-                                  (a.fileName || '').toLowerCase().includes(q) ||
-                                  (a.tags || []).some(t => t.toLowerCase().includes(q));
-                    if (!match) return;
+                if (terms.length) {
+                    const hay = searchHaystack(a);
+                    if (!terms.every(t => hay.includes(t))) return;
                 }
-
-                if (a.collection && articlesByCol[a.collection]) {
-                    articlesByCol[a.collection].push(a);
+                if (a.collection && articlesByCol.has(a.collection)) {
+                    articlesByCol.get(a.collection).push(a);
                 } else {
-                    articlesByCol['Unfiled / General'].push(a);
+                    articlesByCol.get(UNFILED_KEY).push(a);
                 }
             });
 
-            const allFoldersList = [...state.collections];
-            // Only show Unfiled folder if there are documents in it
-            const unfiledArticles = articlesByCol['Unfiled / General'] || [];
-            if (unfiledArticles.length > 0) {
-                allFoldersList.push({
-                    id: 'unfiled_general',
-                    name: 'Unfiled / General',
-                    isUnfiled: true
-                });
+            const allFoldersList = state.collections.map(c => ({ id: c.id, key: c.name, name: c.name }));
+            if (articlesByCol.get(UNFILED_KEY).length > 0) {
+                allFoldersList.push({ id: 'unfiled_general', key: UNFILED_KEY, name: unfiledLabel, isUnfiled: true });
             }
 
             if (allFoldersList.length === 0) {
@@ -489,137 +486,128 @@ window.Lexicon = window.Lexicon || {};
                 container.innerHTML = `
                     <div class="flex flex-col items-center justify-center py-20 text-center bg-paper rounded-2xl border border-wood">
                         <div class="w-16 h-16 rounded-full bg-clay border border-wood flex items-center justify-center text-earth mb-4">
-                            <i class="ph ph-folder-notch-open text-3xl"></i>
+                            <i class="ph ph-folder-notch-open text-3xl" aria-hidden="true"></i>
                         </div>
-                        <h3 class="text-base font-serif font-bold text-soil mb-1">${i18n ? i18n.t('folders.emptyNotice') : 'No collections created yet'}</h3>
-                        <p class="text-xs text-earth max-w-sm mb-6">${i18n ? i18n.t('folders.noFiles') : 'Create your first collection or import folders to organize your research documents.'}</p>
+                        <h3 class="text-base font-serif font-bold text-soil mb-1">${esc(tr('folders.emptyNotice', 'No collections created yet'))}</h3>
+                        <p class="text-xs text-earth max-w-sm mb-6">${esc(tr('folders.noFiles', 'Create your first collection or import folders to organize your research documents.'))}</p>
                         <button type="button" data-action="create-collection-modal" class="px-4 py-2 bg-jungle text-white rounded-xl text-xs font-semibold hover:bg-canopy transition-colors flex items-center gap-2 cursor-pointer">
-                            <i class="ph ph-folder-plus text-base"></i>
-                            <span>${i18n ? i18n.t('collections.createBtn') : 'Create Collection'}</span>
+                            <i class="ph ph-folder-plus text-base" aria-hidden="true"></i>
+                            <span>${esc(tr('collections.createBtn', 'Create Collection'))}</span>
                         </button>
                     </div>
                 `;
                 return;
             }
 
-            const allExpanded = allFoldersList.length > 0 && allFoldersList.every(f => (state.expandedFolders || []).includes(f.name));
+            const expanded = new Set(state.expandedFolders || []);
+            const allExpanded = allFoldersList.every(f => expanded.has(f.key));
 
             container.className = 'flex flex-col gap-4 pb-24';
 
-            // Top Toolbar for Folders View
             const toolbarHtml = `
                 <div class="flex flex-wrap items-center justify-between gap-3 bg-paper border border-wood/70 rounded-2xl px-5 py-3 shadow-2xs mb-2">
                     <div class="flex items-center gap-2 text-xs text-earth">
-                        <span class="w-2 h-2 rounded-full bg-leaf"></span>
-                        <span class="font-bold text-soil">${allFoldersList.length}</span> ${colWord}
-                        ${q ? `<span class="bg-jungle/10 text-canopy px-2 py-0.5 rounded text-[11px] font-medium ml-1">${i18n ? i18n.t('search.filteredBy') : 'Filtered by:'} "${window.Lexicon.Utils.escapeHTML(state.searchQuery)}"</span>` : ''}
+                        <span class="w-2 h-2 rounded-full bg-leaf" aria-hidden="true"></span>
+                        <span class="font-bold text-soil">${allFoldersList.length}</span> ${esc(allFoldersList.length === 1 ? tr('common.collection', 'coleção') : tr('common.collectionsLower', 'coleções'))}
+                        ${terms.length ? `<span class="bg-jungle/10 text-canopy px-2 py-0.5 rounded text-[11px] font-medium ml-1">${esc(tr('search.filteredBy', 'Filtered by:'))} "${esc(state.searchQuery)}"</span>` : ''}
                     </div>
                     <div class="flex items-center gap-2">
-                        <button type="button" data-action="toggle-all-folders" data-expand="${!allExpanded}" 
+                        <button type="button" data-action="toggle-all-folders" data-expand="${!allExpanded}"
                                 class="px-3.5 py-1.5 bg-sand hover:bg-wood/40 border border-wood rounded-xl text-xs font-semibold text-soil transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer">
-                            <i class="ph ${allExpanded ? 'ph-caret-double-up' : 'ph-caret-double-down'} text-earth"></i>
-                            <span>${allExpanded ? (i18n ? i18n.t('folders.reduceAll') : 'Reduce All Folders') : (i18n ? i18n.t('folders.expandAll') : 'Expand All Folders')}</span>
+                            <i class="ph ${allExpanded ? 'ph-caret-double-up' : 'ph-caret-double-down'} text-earth" aria-hidden="true"></i>
+                            <span>${esc(allExpanded ? tr('folders.reduceAll', 'Reduce All Folders') : tr('folders.expandAll', 'Expand All Folders'))}</span>
                         </button>
-                        <button type="button" data-action="create-collection-modal" 
+                        <button type="button" data-action="create-collection-modal"
                                 class="px-3.5 py-1.5 bg-jungle text-white hover:bg-canopy rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer">
-                            <i class="ph ph-folder-plus text-sm"></i>
-                            <span>${i18n ? i18n.t('collections.createBtn') : 'New Collection'}</span>
+                            <i class="ph ph-folder-plus text-sm" aria-hidden="true"></i>
+                            <span>${esc(tr('collections.createBtn', 'New Collection'))}</span>
                         </button>
                     </div>
                 </div>
             `;
 
             const foldersHtml = allFoldersList.map(folder => {
-                const folderArticles = articlesByCol[folder.name] || [];
-                const isExpanded = (state.expandedFolders || []).includes(folder.name);
+                const folderArticles = articlesByCol.get(folder.key) || [];
+                const isExpanded = expanded.has(folder.key);
 
-                // Summary of formats inside this folder
                 const formatCounts = {};
                 folderArticles.forEach(a => {
-                    const ext = (a.fileName || '').split('.').pop().toUpperCase() || 'DOC';
+                    const ext = (U().fileExt(a.fileName) || 'doc').toUpperCase();
                     formatCounts[ext] = (formatCounts[ext] || 0) + 1;
                 });
                 const formatBreakdown = Object.keys(formatCounts).map(k => `${formatCounts[k]} ${k}`).join(' • ');
-                const folderSafeName = window.Lexicon.Utils.escapeHTML(folder.name);
-                const folderDocWord = folderArticles.length === 1 ? (i18n ? i18n.t('common.document') : 'document') : (i18n ? i18n.t('common.documents') : 'documents');
+                const keyAttr = esc(folder.key);
+                const folderSafeName = esc(folder.name);
+                const folderDocWord = folderArticles.length === 1 ? tr('common.document', 'document') : tr('common.documents', 'documents');
+                const expandLabel = esc(isExpanded ? tr('folders.reduce', 'Reduce') : tr('folders.expand', 'Expand'));
 
                 return `
                     <div class="bg-paper border border-wood rounded-2xl overflow-hidden shadow-2xs transition-all ${isExpanded ? 'border-wood/80 ring-1 ring-jungle/15' : 'hover:border-leaf/50'}">
-                        <!-- Folder Header Bar -->
                         <div class="px-5 py-3.5 bg-clay/35 hover:bg-clay/60 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none"
-                             data-action="toggle-folder-expand" data-folder-name="${folderSafeName}">
+                             data-action="toggle-folder-expand" data-folder-name="${keyAttr}" role="button" tabindex="0" aria-expanded="${isExpanded}">
                             <div class="flex items-center gap-3 min-w-0">
-                                <button type="button" class="w-7 h-7 rounded-lg bg-sand border border-wood/70 flex items-center justify-center text-soil shrink-0 hover:bg-wood/40 transition-transform cursor-pointer"
-                                        data-action="toggle-folder-expand" data-folder-name="${folderSafeName}"
-                                        title="${isExpanded ? (i18n ? i18n.t('folders.reduce') : 'Reduce folder') : (i18n ? i18n.t('folders.expand') : 'Expand folder')}">
+                                <span class="w-7 h-7 rounded-lg bg-sand border border-wood/70 flex items-center justify-center text-soil shrink-0" aria-hidden="true">
                                     <i class="ph-bold ${isExpanded ? 'ph-caret-down' : 'ph-caret-right'} text-xs text-earth"></i>
-                                </button>
-                                
+                                </span>
                                 <div class="w-9 h-9 rounded-xl ${folder.isUnfiled ? 'bg-wood/50 text-earth' : 'bg-jungle/15 text-canopy border border-jungle/20'} flex items-center justify-center shrink-0 shadow-2xs">
-                                    <i class="ph ${folder.isUnfiled ? 'ph-tray' : isExpanded ? 'ph-folder-open' : 'ph-folder'} text-lg"></i>
+                                    <i class="ph ${folder.isUnfiled ? 'ph-tray' : isExpanded ? 'ph-folder-open' : 'ph-folder'} text-lg" aria-hidden="true"></i>
                                 </div>
-
                                 <div class="min-w-0">
                                     <div class="flex items-center gap-2">
                                         <h3 class="font-serif font-bold text-soil text-base tracking-tight truncate">${folderSafeName}</h3>
-                                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-wood/50 text-soil shrink-0 font-mono">
-                                            ${folderArticles.length} ${folderDocWord}
-                                        </span>
+                                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-wood/50 text-soil shrink-0 font-mono">${folderArticles.length} ${esc(folderDocWord)}</span>
                                     </div>
-                                    <p class="text-[11px] text-earth/70 mt-0.5 truncate">
-                                        ${formatBreakdown ? formatBreakdown : (i18n ? i18n.t('folders.noFiles') : 'No files recorded yet')}
-                                    </p>
+                                    <p class="text-[11px] text-earth/70 mt-0.5 truncate">${esc(formatBreakdown || tr('folders.noFiles', 'No files recorded yet'))}</p>
                                 </div>
                             </div>
 
-                            <div class="flex items-center gap-2 shrink-0 self-end sm:self-center" onclick="event.stopPropagation()">
+                            <div class="flex items-center gap-2 shrink-0 self-end sm:self-center" data-action="noop">
                                 ${!folder.isUnfiled ? `
-                                    <button type="button" data-action="add-folder-doc" data-folder-name="${folderSafeName}" 
-                                            class="px-2.5 py-1.5 bg-sand hover:bg-wood/40 border border-wood rounded-lg text-xs font-semibold text-soil transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer" 
-                                            title="${i18n ? i18n.t('folders.addDocTitle') : 'Add document to this collection'}">
-                                        <i class="ph-bold ph-plus text-jungle text-xs"></i>
-                                        <span class="hidden md:inline">${i18n ? i18n.t('folders.addDoc') : 'Add Document'}</span>
-                                    </button>
-
-                                    <button type="button" data-action="select-folder" data-folder-name="${folderSafeName}" 
-                                            class="px-2.5 py-1.5 bg-sand hover:bg-wood/40 border border-wood rounded-lg text-xs font-semibold text-earth hover:text-soil transition-colors flex items-center gap-1 shadow-2xs cursor-pointer" 
-                                            title="${i18n ? i18n.t('folders.filterTitle') : 'Filter library by this collection'}">
-                                        <i class="ph ph-funnel text-xs"></i>
-                                        <span class="hidden md:inline">${i18n ? i18n.t('folders.filter') : 'Filter'}</span>
-                                    </button>
-
-                                    <button type="button" data-action="delete-folder" data-folder-id="${folder.id}" data-folder-name="${folderSafeName}" 
-                                            class="p-1.5 text-earth/60 hover:text-terracotta hover:bg-wood/40 rounded-lg transition-colors cursor-pointer" 
-                                            title="${i18n ? i18n.t('folders.deleteTitle') : 'Delete Collection'}">
-                                        <i class="ph ph-trash text-sm"></i>
+                                    <button type="button" data-action="add-folder-doc" data-folder-name="${keyAttr}"
+                                            class="px-2.5 py-1.5 bg-sand hover:bg-wood/40 border border-wood rounded-lg text-xs font-semibold text-soil transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                                            title="${esc(tr('folders.addDocTitle', 'Add document to this collection'))}">
+                                        <i class="ph-bold ph-plus text-jungle text-xs" aria-hidden="true"></i>
+                                        <span class="hidden md:inline">${esc(tr('folders.addDoc', 'Add Document'))}</span>
                                     </button>
                                 ` : ''}
-
-                                <button type="button" data-action="toggle-folder-expand" data-folder-name="${folderSafeName}" 
+                                <button type="button" data-action="select-folder" data-folder-name="${keyAttr}"
+                                        class="px-2.5 py-1.5 bg-sand hover:bg-wood/40 border border-wood rounded-lg text-xs font-semibold text-earth hover:text-soil transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                                        title="${esc(tr('folders.filterTitle', 'Filter library by this collection'))}">
+                                    <i class="ph ph-funnel text-xs" aria-hidden="true"></i>
+                                    <span class="hidden md:inline">${esc(tr('folders.filter', 'Filter'))}</span>
+                                </button>
+                                ${!folder.isUnfiled ? `
+                                    <button type="button" data-action="delete-folder" data-folder-id="${esc(folder.id)}" data-folder-name="${keyAttr}"
+                                            class="p-1.5 text-earth/60 hover:text-terracotta hover:bg-wood/40 rounded-lg transition-colors cursor-pointer"
+                                            title="${esc(tr('folders.deleteTitle', 'Delete Collection'))}" aria-label="${esc(tr('folders.deleteTitle', 'Delete Collection'))}">
+                                        <i class="ph ph-trash text-sm" aria-hidden="true"></i>
+                                    </button>
+                                ` : ''}
+                                <button type="button" data-action="toggle-folder-expand" data-folder-name="${keyAttr}"
                                         class="px-2.5 py-1.5 bg-sand hover:bg-wood/40 border border-wood rounded-lg text-xs font-semibold text-soil transition-colors flex items-center gap-1 cursor-pointer">
-                                    <span>${isExpanded ? (i18n ? i18n.t('folders.reduce') : 'Reduce') : (i18n ? i18n.t('folders.expand') : 'Expand')}</span>
-                                    <i class="ph ${isExpanded ? 'ph-caret-up text-xs' : 'ph-caret-down text-xs'}"></i>
+                                    <span>${expandLabel}</span>
+                                    <i class="ph ${isExpanded ? 'ph-caret-up text-xs' : 'ph-caret-down text-xs'}" aria-hidden="true"></i>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Folder Content Area (when expanded) -->
                         ${isExpanded ? `
                             <div class="p-4 border-t border-wood/40 bg-sand/30">
                                 ${folderArticles.length === 0 ? `
                                     <div class="text-center py-6 px-4 border border-dashed border-wood/70 rounded-xl bg-white/50">
-                                        <p class="text-xs text-earth font-medium">${i18n ? i18n.t('folders.emptyNotice') : 'No documents in this folder.'}</p>
+                                        <p class="text-xs text-earth font-medium">${esc(tr('folders.emptyFolderNotice', 'Nenhum documento nesta pasta.'))}</p>
                                         ${!folder.isUnfiled ? `
-                                            <button type="button" data-action="add-folder-doc" data-folder-name="${folderSafeName}" 
+                                            <button type="button" data-action="add-folder-doc" data-folder-name="${keyAttr}"
                                                     class="mt-2 text-xs text-jungle font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer">
-                                                <i class="ph-bold ph-plus"></i> ${i18n ? i18n.t('folders.addDocsNow') : 'Add documents now'}
+                                                <i class="ph-bold ph-plus" aria-hidden="true"></i> ${esc(tr('folders.addDocsNow', 'Add documents now'))}
                                             </button>
                                         ` : ''}
                                     </div>
                                 ` : `
                                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                        ${folderArticles.map(a => this.createFolderDocTileHtml(a)).join('')}
+                                        ${folderArticles.slice(0, PAGE_SIZE).map(a => this.createFolderDocTileHtml(a)).join('')}
                                     </div>
+                                    ${folderArticles.length > PAGE_SIZE ? `<p class="text-[11px] text-earth mt-2 text-center">${esc(tr('folders.moreInFilter', '+{count} documentos — use "Filtrar" para ver todos.', { count: folderArticles.length - PAGE_SIZE }))}</p>` : ''}
                                 `}
                             </div>
                         ` : ''}
@@ -631,93 +619,68 @@ window.Lexicon = window.Lexicon || {};
         },
 
         createFolderDocTileHtml(article) {
-            const i18n = window.Lexicon.I18n;
-            const formatIcon = article.coverType === 'book' ? 'ph-book-bookmark text-terracotta' :
-                               article.coverType === 'doc' ? 'ph-file-doc text-jungle' :
-                               'ph-file-pdf text-terracotta';
             const statusClass = this.getStatusBadgeClass(article.status);
             const statusLabel = this.getStatusLabel(article.status);
-            const readText = i18n ? i18n.t('common.read') : 'READ';
+            const favLabel = esc(article.isFavorite ? tr('inspector.favoriteRemove', 'Remover dos favoritos') : tr('inspector.favoriteAdd', 'Adicionar aos favoritos'));
 
             return `
                 <div class="bg-paper border border-wood/80 hover:border-jungle rounded-xl p-3.5 flex flex-col justify-between shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
-                     data-action="inspect-article" data-article-id="${article.id}">
+                     data-action="inspect-article" data-article-id="${Number(article.id)}" role="button" tabindex="0" aria-label="${esc(article.title)}">
                     <div>
                         <div class="flex items-center justify-between mb-1.5">
                             <div class="flex items-center gap-1.5">
-                                <i class="ph ${formatIcon} text-base"></i>
-                                <span class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${statusClass}">
-                                    ${statusLabel}
-                                </span>
+                                <i class="ph ${fileTypeIcon(article)} text-base" aria-hidden="true"></i>
+                                <span class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${statusClass}">${esc(statusLabel)}</span>
                             </div>
-                            <button type="button" data-action="toggle-favorite" data-article-id="${article.id}" 
-                                    class="p-1 text-wood hover:text-yellow-500 transition-colors cursor-pointer ${article.isFavorite ? 'text-yellow-500' : ''}">
-                                <i class="${article.isFavorite ? 'ph-fill' : 'ph'} ph-star text-sm"></i>
+                            <button type="button" data-action="toggle-favorite" data-article-id="${Number(article.id)}"
+                                    class="p-1 text-wood hover:text-yellow-500 transition-colors cursor-pointer ${article.isFavorite ? 'text-yellow-500' : ''}"
+                                    title="${favLabel}" aria-label="${favLabel}" aria-pressed="${!!article.isFavorite}">
+                                <i class="${article.isFavorite ? 'ph-fill' : 'ph'} ph-star text-sm" aria-hidden="true"></i>
                             </button>
                         </div>
-                        <h4 class="font-serif font-bold text-xs text-soil group-hover:text-jungle transition-colors line-clamp-2 mb-1 leading-snug">
-                            ${window.Lexicon.Utils.escapeHTML(article.title)}
-                        </h4>
-                        <p class="text-[11px] text-earth/80 truncate mb-2">
-                            ${window.Lexicon.Utils.escapeHTML(String(article.authors)) || 'Unknown'} • ${window.Lexicon.Utils.escapeHTML(String(article.year)) || 'N/A'}
-                        </p>
+                        <h4 class="font-serif font-bold text-xs text-soil group-hover:text-jungle transition-colors line-clamp-2 mb-1 leading-snug">${esc(article.title)}</h4>
+                        <p class="text-[11px] text-earth/80 truncate mb-2">${disp(article.authors, tr('common.unknownAuthor', 'Autor desconhecido'))} • ${disp(article.year, 'N/A')}</p>
                     </div>
-
                     <div class="pt-2 border-t border-wood/40 flex items-center justify-between text-[10px] text-earth/70 mt-2">
-                        <span class="font-mono truncate max-w-[120px]">${article.fileSize || 'Local'}</span>
-                        <button type="button" data-action="read-article" data-article-id="${article.id}" 
+                        <span class="font-mono truncate max-w-[120px]">${disp(article.fileSize, tr('common.noFile', 'Sem arquivo'))}</span>
+                        <button type="button" data-action="read-article" data-article-id="${Number(article.id)}"
                                 class="px-2 py-0.5 rounded bg-jungle/10 hover:bg-jungle text-canopy hover:text-white font-bold transition-colors flex items-center gap-1 cursor-pointer">
-                            <i class="ph ph-book-open"></i> ${readText}
+                            <i class="ph ph-book-open" aria-hidden="true"></i> ${esc(tr('common.read', 'READ'))}
                         </button>
                     </div>
                 </div>
             `;
         },
 
-        toggleFolderExpand(folderName) {
+        toggleFolderExpand(folderKey) {
             const state = window.Lexicon.State;
-            state.expandedFolders = state.expandedFolders || [];
-            const idx = state.expandedFolders.indexOf(folderName);
-            if (idx >= 0) {
-                state.expandedFolders.splice(idx, 1);
-            } else {
-                state.expandedFolders.push(folderName);
-            }
+            state.expandedFolders = Array.isArray(state.expandedFolders) ? state.expandedFolders : [];
+            const idx = state.expandedFolders.indexOf(folderKey);
+            if (idx >= 0) state.expandedFolders.splice(idx, 1);
+            else state.expandedFolders.push(folderKey);
             this.render();
         },
 
         toggleAllFolders(expand) {
             const state = window.Lexicon.State;
-            if (expand) {
-                state.expandedFolders = state.collections.map(c => c.name);
-                state.expandedFolders.push('Unfiled / General');
-            } else {
-                state.expandedFolders = [];
-            }
+            state.expandedFolders = expand ? state.collections.map(c => c.name).concat([UNFILED_KEY]) : [];
             this.render();
         },
 
         openAddModalForCollection(colName) {
-            window.Lexicon.UI.Modal.open('upload-modal');
-            const formCol = document.getElementById('form-collection');
-            const importDefCol = document.getElementById('import-opt-default-collection');
-            if (formCol) formCol.value = colName;
-            if (importDefCol) importDefCol.value = colName;
+            L().UI.Modal.open('upload-modal');
+            L().Collections.fillSelect(document.getElementById('form-collection'), colName);
+            L().Collections.fillSelect(document.getElementById('import-opt-default-collection'), colName);
         },
 
         /**
          * Render High-Density Table View
          */
-        renderTable(articles) {
+        renderTable(articles, allFiltered) {
             const state = window.Lexicon.State;
-            const i18n = window.Lexicon.I18n;
-            const allSelected = articles.length > 0 && articles.every(a => (state.selectedIds || []).includes(a.id));
-
-            const colTitle = i18n ? i18n.t('table.colTitle') : 'Title & Details';
-            const colCollection = i18n ? i18n.t('table.colCollection') : 'Collection';
-            const colFile = 'File Name / Path';
-            const colTags = i18n ? i18n.t('table.colTags') : 'Tags';
-            const colAction = i18n ? i18n.t('table.colActions') : 'Action';
+            const selected = new Set(state.selectedIds || []);
+            const pool = allFiltered || articles;
+            const allSelected = pool.length > 0 && pool.every(a => selected.has(a.id));
 
             return `
                 <div class="bg-paper border border-wood rounded-xl overflow-hidden shadow-sm">
@@ -725,22 +688,22 @@ window.Lexicon = window.Lexicon || {};
                         <table class="w-full text-left text-sm text-soil border-collapse">
                             <thead>
                                 <tr class="border-b border-wood bg-clay/50 text-xs font-semibold text-earth uppercase tracking-wider">
-                                    <th class="py-3 px-3 w-10 text-center">
-                                        <input type="checkbox" id="table-select-all" 
+                                    <th class="py-3 px-3 w-10 text-center" scope="col">
+                                        <input type="checkbox" id="table-select-all" data-action="toggle-select-all"
                                                class="w-4 h-4 rounded text-jungle focus:ring-jungle border-wood cursor-pointer"
-                                               ${allSelected ? 'checked' : ''} 
-                                               onclick="Lexicon.Articles.toggleSelectAll(this.checked)">
+                                               aria-label="${esc(tr('table.selectAll', 'Selecionar todos'))}"
+                                               ${allSelected ? 'checked' : ''}>
                                     </th>
-                                    <th class="py-3 px-3 w-28">Status</th>
-                                    <th class="py-3 px-4">${colTitle}</th>
-                                    <th class="py-3 px-4 w-40">${colCollection}</th>
-                                    <th class="py-3 px-4 w-44">${colFile}</th>
-                                    <th class="py-3 px-4 w-40">${colTags}</th>
-                                    <th class="py-3 px-4 text-right w-28">${colAction}</th>
+                                    <th class="py-3 px-3 w-28" scope="col">${esc(tr('table.colStatus', 'Status'))}</th>
+                                    <th class="py-3 px-4" scope="col">${esc(tr('table.colTitle', 'Title & Details'))}</th>
+                                    <th class="py-3 px-4 w-40" scope="col">${esc(tr('table.colCollection', 'Collection'))}</th>
+                                    <th class="py-3 px-4 w-44" scope="col">${esc(tr('table.colFile', 'Arquivo'))}</th>
+                                    <th class="py-3 px-4 w-40" scope="col">${esc(tr('table.colTags', 'Tags'))}</th>
+                                    <th class="py-3 px-4 text-right w-28" scope="col">${esc(tr('table.colActions', 'Action'))}</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-wood/50">
-                                ${articles.map(a => this.createTableRowHtml(a)).join('')}
+                                ${articles.map(a => this.createTableRowHtml(a, selected)).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -748,163 +711,108 @@ window.Lexicon = window.Lexicon || {};
             `;
         },
 
+        _tagsHtml(article, max, extraClass = '') {
+            return (article.tags || []).slice(0, max).map(tag =>
+                `<span data-action="filter-tag" data-tag-name="${esc(tag)}" role="button" tabindex="0"
+                       class="tag-chip cursor-pointer ${extraClass}" title="${esc(tr('search.filterByTag', 'Filtrar por #{tag}', { tag }))}">#${esc(tag)}</span>`
+            ).join('');
+        },
+
         createCardHtml(article) {
             const state = window.Lexicon.State;
-            const i18n = window.Lexicon.I18n;
             const isSelected = (state.selectedIds || []).includes(article.id);
-            const formatIcon = article.coverType === 'book' ? 'ph-book-bookmark text-terracotta' :
-                               article.coverType === 'doc' ? 'ph-file-doc text-jungle' :
-                               'ph-file-pdf text-terracotta';
-
             const statusClass = this.getStatusBadgeClass(article.status);
             const statusLabel = this.getStatusLabel(article.status);
-
-            const tagsHtml = (article.tags || []).slice(0, 3).map(tag => 
-                `<span data-action="filter-tag" data-tag-name="${window.Lexicon.Utils.escapeHTML(tag)}" 
-                       class="tag-chip cursor-pointer" title="Filter by #${window.Lexicon.Utils.escapeHTML(tag)}">
-                    #${window.Lexicon.Utils.escapeHTML(tag)}
-                 </span>`
-            ).join('');
-
-            const favTitle = article.isFavorite ? 
-                (i18n ? i18n.t('inspector.starRemoved') : 'Remove from favorites') : 
-                (i18n ? i18n.t('inspector.starAdded') : 'Add to favorites');
-
-            const unfiledLabel = i18n ? i18n.t('folders.unfiled') : 'Uncategorized';
+            const favTitle = esc(article.isFavorite ? tr('inspector.favoriteRemove', 'Remover dos favoritos') : tr('inspector.favoriteAdd', 'Adicionar aos favoritos'));
+            const unfiledLabel = tr('folders.unfiled', 'Sem coleção');
+            const id = Number(article.id);
 
             return `
-                <div class="glass-card rounded-xl p-5 flex flex-col h-80 group relative overflow-hidden cursor-pointer ${isSelected ? 'card-selected' : ''}" 
-                     data-action="inspect-article" data-article-id="${article.id}">
-                    
-                    <!-- Card Header -->
+                <div class="glass-card rounded-xl p-5 flex flex-col h-80 group relative overflow-hidden cursor-pointer ${isSelected ? 'card-selected' : ''}"
+                     data-action="inspect-article" data-article-id="${id}" role="button" tabindex="0" aria-label="${esc(article.title)}">
                     <div class="flex justify-between items-start mb-3">
                         <div class="flex items-center gap-2">
-                            <input type="checkbox" 
-                                   class="card-checkbox w-4 h-4 rounded text-jungle focus:ring-jungle border-wood cursor-pointer" 
-                                   ${isSelected ? 'checked' : ''} 
-                                   data-action="toggle-select" data-article-id="${article.id}">
+                            <input type="checkbox"
+                                   class="card-checkbox w-4 h-4 rounded text-jungle focus:ring-jungle border-wood cursor-pointer"
+                                   ${isSelected ? 'checked' : ''} aria-label="${esc(tr('batch.selectDoc', 'Selecionar documento'))}"
+                                   data-action="toggle-select" data-article-id="${id}">
                             <div class="w-8 h-8 rounded-lg bg-sand border border-wood flex items-center justify-center shrink-0">
-                                <i class="ph ${formatIcon} text-base"></i>
+                                <i class="ph ${fileTypeIcon(article)} text-base" aria-hidden="true"></i>
                             </div>
-                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${statusClass}">
-                                ${statusLabel}
-                            </span>
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${statusClass}">${esc(statusLabel)}</span>
                         </div>
-                        
-                        <!-- Card Star Action -->
                         <div class="flex items-center gap-1">
-                            <button type="button" data-action="toggle-favorite" data-article-id="${article.id}" 
-                                    class="p-1.5 rounded-md hover:bg-wood/50 transition-colors cursor-pointer ${article.isFavorite ? 'text-yellow-500' : 'text-wood hover:text-yellow-500'}" 
-                                    title="${favTitle}">
-                                <i class="${article.isFavorite ? 'ph-fill' : 'ph'} ph-star text-lg"></i>
+                            <button type="button" data-action="toggle-favorite" data-article-id="${id}"
+                                    class="p-1.5 rounded-md hover:bg-wood/50 transition-colors cursor-pointer ${article.isFavorite ? 'text-yellow-500' : 'text-wood hover:text-yellow-500'}"
+                                    title="${favTitle}" aria-label="${favTitle}" aria-pressed="${!!article.isFavorite}">
+                                <i class="${article.isFavorite ? 'ph-fill' : 'ph'} ph-star text-lg" aria-hidden="true"></i>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Card Body -->
                     <div class="flex-1 min-h-0">
-                        <h3 class="font-serif font-bold text-soil leading-snug mb-1 line-clamp-2 text-base group-hover:text-jungle transition-colors">
-                            ${window.Lexicon.Utils.escapeHTML(article.title)}
-                        </h3>
-                        <p class="text-xs text-earth mb-2 font-medium truncate">
-                            ${window.Lexicon.Utils.escapeHTML(String(article.authors)) || 'Unknown'} • ${window.Lexicon.Utils.escapeHTML(String(article.year)) || 'N/A'}
-                        </p>
-                        <p class="text-xs text-earth/80 line-clamp-3 leading-relaxed mb-3 font-normal">
-                            ${window.Lexicon.Utils.escapeHTML(String(article.summary)) || 'Click to view overview, metadata, summary, and open document.'}
-                        </p>
+                        <h3 class="font-serif font-bold text-soil leading-snug mb-1 line-clamp-2 text-base group-hover:text-jungle transition-colors">${esc(article.title)}</h3>
+                        <p class="text-xs text-earth mb-2 font-medium truncate">${disp(article.authors, tr('common.unknownAuthor', 'Autor desconhecido'))} • ${disp(article.year, 'N/A')}</p>
+                        <p class="text-xs text-earth/80 line-clamp-3 leading-relaxed mb-3 font-normal">${disp(article.summary, tr('common.cardNoSummary', 'Clique para ver resumo, metadados e abrir o documento.'))}</p>
                     </div>
 
-                    <!-- Card Footer: File Info & Tags -->
                     <div class="pt-2 border-t border-wood/40 flex flex-col gap-2 mt-auto">
                         <div class="flex items-center justify-between text-[11px] text-earth/70">
                             <span class="truncate flex items-center gap-1">
-                                <i class="ph ph-folder text-xs"></i>
-                                <span>${window.Lexicon.Utils.escapeHTML(String(article.collection)) || unfiledLabel}</span>
+                                <i class="ph ph-folder text-xs" aria-hidden="true"></i>
+                                <span>${disp(article.collection, unfiledLabel)}</span>
                             </span>
-                            <span class="font-mono text-[10px] shrink-0 text-earth/60">
-                                ${article.fileSize || 'Local'}
-                            </span>
+                            <span class="font-mono text-[10px] shrink-0 text-earth/60">${disp(article.fileSize, tr('common.noFile', 'Sem arquivo'))}</span>
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center overflow-hidden h-6">
-                            ${tagsHtml}
-                        </div>
+                        <div class="flex flex-wrap gap-1 items-center overflow-hidden h-6">${this._tagsHtml(article, 3)}</div>
                     </div>
 
-                    <!-- Bottom Accent Bar -->
-                    <div class="absolute bottom-0 left-0 w-full h-1 bg-jungle transform translate-y-1 group-hover:translate-y-0 transition-transform"></div>
+                    <div class="absolute bottom-0 left-0 w-full h-1 bg-jungle transform translate-y-1 group-hover:translate-y-0 transition-transform" aria-hidden="true"></div>
                 </div>
             `;
         },
 
-        createTableRowHtml(article) {
-            const state = window.Lexicon.State;
-            const i18n = window.Lexicon.I18n;
-            const isSelected = (state.selectedIds || []).includes(article.id);
-            const formatIcon = article.coverType === 'book' ? 'ph-book-bookmark text-terracotta' :
-                               article.coverType === 'doc' ? 'ph-file-doc text-jungle' :
-                               'ph-file-pdf text-terracotta';
-
+        createTableRowHtml(article, selectedSet) {
+            const isSelected = selectedSet ? selectedSet.has(article.id) : (window.Lexicon.State.selectedIds || []).includes(article.id);
             const statusClass = this.getStatusBadgeClass(article.status);
             const statusLabel = this.getStatusLabel(article.status);
-
-            const tagsHtml = (article.tags || []).slice(0, 2).map(tag => 
-                `<span data-action="filter-tag" data-tag-name="${window.Lexicon.Utils.escapeHTML(tag)}" 
-                       class="tag-chip cursor-pointer text-[10px]">
-                    #${window.Lexicon.Utils.escapeHTML(tag)}
-                 </span>`
-            ).join('');
-
-            const readText = i18n ? i18n.t('common.read') : 'Read';
+            const id = Number(article.id);
+            const favTitle = esc(article.isFavorite ? tr('inspector.favoriteRemove', 'Remover dos favoritos') : tr('inspector.favoriteAdd', 'Adicionar aos favoritos'));
 
             return `
-                <tr class="hover:bg-sand/60 transition-colors cursor-pointer group ${isSelected ? 'bg-jungle/10 font-medium' : ''}" 
-                    data-action="inspect-article" data-article-id="${article.id}">
+                <tr class="hover:bg-sand/60 transition-colors cursor-pointer group ${isSelected ? 'bg-jungle/10 font-medium' : ''}"
+                    data-action="inspect-article" data-article-id="${id}" tabindex="0" aria-label="${esc(article.title)}">
                     <td class="py-3 px-3 text-center">
-                        <input type="checkbox" 
-                               class="w-4 h-4 rounded text-jungle focus:ring-jungle border-wood cursor-pointer"
-                               ${isSelected ? 'checked' : ''} 
-                               data-action="toggle-select" data-article-id="${article.id}">
+                        <input type="checkbox" class="w-4 h-4 rounded text-jungle focus:ring-jungle border-wood cursor-pointer"
+                               ${isSelected ? 'checked' : ''} aria-label="${esc(tr('batch.selectDoc', 'Selecionar documento'))}"
+                               data-action="toggle-select" data-article-id="${id}">
                     </td>
                     <td class="py-3 px-3">
-                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${statusClass}">
-                            ${statusLabel}
-                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${statusClass}">${esc(statusLabel)}</span>
                     </td>
                     <td class="py-3 px-4 min-w-0">
                         <div class="flex items-center gap-3">
-                            <i class="ph ${formatIcon} text-lg shrink-0"></i>
+                            <i class="ph ${fileTypeIcon(article)} text-lg shrink-0" aria-hidden="true"></i>
                             <div class="truncate">
-                                <div class="font-serif font-semibold text-soil truncate group-hover:text-jungle transition-colors">
-                                    ${window.Lexicon.Utils.escapeHTML(article.title)}
-                                </div>
-                                <div class="text-xs text-earth/70 truncate">
-                                    ${window.Lexicon.Utils.escapeHTML(String(article.authors)) || 'Unknown'} (${window.Lexicon.Utils.escapeHTML(String(article.year)) || 'N/A'})
-                                </div>
+                                <div class="font-serif font-semibold text-soil truncate group-hover:text-jungle transition-colors">${esc(article.title)}</div>
+                                <div class="text-xs text-earth/70 truncate">${disp(article.authors, tr('common.unknownAuthor', 'Autor desconhecido'))} (${disp(article.year, 'N/A')})</div>
                             </div>
                         </div>
                     </td>
-                    <td class="py-3 px-4 text-xs text-earth">
-                        ${window.Lexicon.Utils.escapeHTML(String(article.collection)) || '—'}
-                    </td>
-                    <td class="py-3 px-4 text-xs font-mono text-earth/80 truncate max-w-[180px]" title="${article.filePath || article.fileName || 'Local file'}">
-                        ${window.Lexicon.Utils.escapeHTML(String(article.fileName)) || 'document.pdf'}
-                    </td>
-                    <td class="py-3 px-4">
-                        <div class="flex flex-wrap gap-1">
-                            ${tagsHtml}
-                        </div>
-                    </td>
+                    <td class="py-3 px-4 text-xs text-earth">${disp(article.collection, '—')}</td>
+                    <td class="py-3 px-4 text-xs font-mono text-earth/80 truncate max-w-[180px]" title="${esc(article.filePath || article.fileName || '')}">${disp(article.fileName, '—')}</td>
+                    <td class="py-3 px-4"><div class="flex flex-wrap gap-1">${this._tagsHtml(article, 2, 'text-[10px]')}</div></td>
                     <td class="py-3 px-4 text-right">
                         <div class="flex items-center justify-end gap-1">
-                            <button type="button" data-action="toggle-favorite" data-article-id="${article.id}" 
-                                    class="p-1 rounded hover:bg-wood/50 transition-colors cursor-pointer ${article.isFavorite ? 'text-yellow-500' : 'text-wood hover:text-yellow-500'}" 
-                                    title="Favorite">
-                                <i class="${article.isFavorite ? 'ph-fill' : 'ph'} ph-star text-base"></i>
+                            <button type="button" data-action="toggle-favorite" data-article-id="${id}"
+                                    class="p-1 rounded hover:bg-wood/50 transition-colors cursor-pointer ${article.isFavorite ? 'text-yellow-500' : 'text-wood hover:text-yellow-500'}"
+                                    title="${favTitle}" aria-label="${favTitle}" aria-pressed="${!!article.isFavorite}">
+                                <i class="${article.isFavorite ? 'ph-fill' : 'ph'} ph-star text-base" aria-hidden="true"></i>
                             </button>
-                            <button type="button" data-action="read-article" data-article-id="${article.id}" 
+                            <button type="button" data-action="read-article" data-article-id="${id}"
                                     class="px-2 py-1 bg-jungle/10 hover:bg-jungle text-jungle hover:text-white rounded text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer"
-                                    title="Open to Read">
-                                <i class="ph ph-book-open"></i> ${readText}
+                                    title="${esc(tr('inspector.readTooltip', 'Abrir no leitor'))}">
+                                <i class="ph ph-book-open" aria-hidden="true"></i> ${esc(tr('common.read', 'Read'))}
                             </button>
                         </div>
                     </td>
@@ -914,7 +822,6 @@ window.Lexicon = window.Lexicon || {};
 
         getStatusBadgeClass(status) {
             switch (status) {
-                case 'inbox': return 'badge-status-inbox';
                 case 'reading': return 'badge-status-reading';
                 case 'processing': return 'badge-status-processing';
                 case 'archived': return 'badge-status-archived';
@@ -923,108 +830,109 @@ window.Lexicon = window.Lexicon || {};
         },
 
         getStatusLabel(status) {
-            const i18n = window.Lexicon.I18n;
             switch (status) {
-                case 'inbox': return i18n ? i18n.t('nav.inbox') : 'Inbox';
-                case 'reading': return i18n ? i18n.t('nav.reading') : 'Reading';
-                case 'processing': return i18n ? i18n.t('nav.processing') : 'Fichamento';
-                case 'archived': return i18n ? i18n.t('nav.archived') : 'Archived';
-                default: return i18n ? i18n.t('nav.inbox') : 'Inbox';
+                case 'reading': return tr('nav.reading', 'Reading');
+                case 'processing': return tr('nav.processing', 'Fichamento');
+                case 'archived': return tr('nav.archived', 'Archived');
+                default: return tr('nav.inbox', 'Inbox');
             }
         },
 
+        /* ------------------------------------------------------------------
+           Filters
+           ------------------------------------------------------------------ */
+        _resetSearchUI() {
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) searchInput.value = '';
+        },
+
         filterByTag(tag) {
-            if (window.Lexicon.Navigation) {
-                window.Lexicon.Navigation.recordNavigation();
-            }
+            if (L().Navigation) L().Navigation.recordNavigation();
             const state = window.Lexicon.State;
             state.activeTag = tag;
             state.searchQuery = '';
             state.semanticFilter = null;
             state.selectedIds = [];
-            const searchInput = document.getElementById('search-input');
-            if (searchInput) searchInput.value = '';
+            // A tag filter applies to the whole library unless we're inside a collection
+            if (state.currentFilter.type === 'category' && ['stats', 'collections'].includes(state.currentFilter.value)) {
+                state.currentFilter = { type: 'category', value: 'all', title: tr('nav.all', 'All Documents') };
+            }
+            this._resetSearchUI();
+            L().Collections.render();
             this.render();
         },
 
         clearTagFilter() {
-            if (window.Lexicon.Navigation) {
-                window.Lexicon.Navigation.recordNavigation();
-            }
-            const state = window.Lexicon.State;
-            state.activeTag = null;
+            if (L().Navigation) L().Navigation.recordNavigation();
+            window.Lexicon.State.activeTag = null;
             this.render();
         },
 
         filterByCollection(name) {
-            if (window.Lexicon.Collections) {
-                window.Lexicon.Collections.select(name);
+            if (!name) {
+                this.filterUnfiled();
+                return;
             }
+            L().Collections.select(name);
+        },
+
+        /** Show documents that are not in any (existing) collection */
+        filterUnfiled() {
+            if (L().Navigation) L().Navigation.recordNavigation();
+            const state = window.Lexicon.State;
+            state.currentFilter = { type: 'unfiled', value: UNFILED_KEY, title: tr('folders.unfiled', 'Sem coleção') };
+            state.activeTag = null;
+            state.searchQuery = '';
+            state.semanticFilter = null;
+            state.selectedIds = [];
+            this._resetSearchUI();
+            L().Collections.render();
+            this.render();
         },
 
         setCategoryFilter(filterValue) {
-            if (window.Lexicon.Navigation) {
-                window.Lexicon.Navigation.recordNavigation();
-            }
+            if (L().Navigation) L().Navigation.recordNavigation();
             const state = window.Lexicon.State;
-            const localizedTitle = window.Lexicon.I18n ? window.Lexicon.I18n.t(`nav.${filterValue}`) : null;
-            const titles = {
-                'all': 'All Documents',
-                'collections': 'Collections & Folders',
-                'inbox': 'Inbox (Unsorted)',
-                'reading': 'Reading List',
-                'processing': 'Notes',
-                'favorites': 'Favorite Documents',
-                'archived': 'Archived References',
-                'recent': 'Recently Added',
-                'stats': 'Estatísticas & Insights'
-            };
             state.currentFilter = {
                 type: 'category',
                 value: filterValue,
-                title: localizedTitle || titles[filterValue] || 'Documents'
+                title: tr(`nav.${filterValue}`, filterValue)
             };
             state.activeTag = null;
             state.searchQuery = '';
             state.semanticFilter = null;
             state.selectedIds = [];
-            const searchInput = document.getElementById('search-input');
-            if (searchInput) searchInput.value = '';
-            if (window.Lexicon.Collections) window.Lexicon.Collections.render();
+            this._resetSearchUI();
+            L().Collections.render();
             this.render();
-            if (window.Lexicon.Navigation) window.Lexicon.Navigation.updateActiveSidebarLink();
+            if (L().Navigation) L().Navigation.updateActiveSidebarLink();
         },
 
         /* ------------------------------------------------------------------
            Multiple Selection & Batch Operations
            ------------------------------------------------------------------ */
+        _selectedSet() {
+            return new Set(window.Lexicon.State.selectedIds || []);
+        },
+
         toggleSelect(id) {
             const state = window.Lexicon.State;
             state.selectedIds = state.selectedIds || [];
             const idx = state.selectedIds.indexOf(id);
-            if (idx >= 0) {
-                state.selectedIds.splice(idx, 1);
-            } else {
-                state.selectedIds.push(id);
-            }
-            this.render();
+            if (idx >= 0) state.selectedIds.splice(idx, 1);
+            else state.selectedIds.push(id);
+            this.render({ keepLimit: true });
         },
 
         toggleSelectAll(checked) {
             const state = window.Lexicon.State;
-            if (checked) {
-                const currentList = this.getFilteredArticles();
-                state.selectedIds = currentList.map(a => a.id);
-            } else {
-                state.selectedIds = [];
-            }
-            this.render();
+            state.selectedIds = checked ? this.getFilteredArticles().map(a => a.id) : [];
+            this.render({ keepLimit: true });
         },
 
         clearSelection() {
-            const state = window.Lexicon.State;
-            state.selectedIds = [];
-            this.render();
+            window.Lexicon.State.selectedIds = [];
+            this.render({ keepLimit: true });
         },
 
         updateBatchBar() {
@@ -1037,41 +945,42 @@ window.Lexicon = window.Lexicon || {};
             const n = (state.selectedIds || []).length;
             if (n > 0) {
                 bar.classList.remove('hidden-bar');
-                if (countEl) {
-                    const label = window.Lexicon.I18n ? window.Lexicon.I18n.t('batch.selected') : 'selected';
-                    countEl.textContent = `${n} ${label}`;
-                }
-
+                bar.removeAttribute('aria-hidden');
+                if (countEl) countEl.textContent = `${n} ${tr('batch.selected', 'selected')}`;
                 if (colSelect) {
-                    colSelect.innerHTML = '<option value="">Move to Collection...</option>' +
-                        '<option value="__NEW__">+ Create New Collection...</option>' +
-                        '<option value="none">(None / General)</option>' +
-                        state.collections.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+                    colSelect.innerHTML = L().Collections.optionsHtml({
+                        noneValue: 'none',
+                        noneLabel: tr('batch.noneCollection', '(Nenhuma / Geral)'),
+                        extra: `<option value="">${esc(tr('batch.moveToCollection', 'Mover para coleção...'))}</option>` +
+                               `<option value="__NEW__">${esc(tr('batch.createNewCollection', '+ Criar nova coleção...'))}</option>`
+                    });
+                    colSelect.value = '';
                 }
             } else {
                 bar.classList.add('hidden-bar');
+                bar.setAttribute('aria-hidden', 'true');
             }
         },
 
         batchChangeStatus(status) {
-            if (!status) return;
+            const select = document.getElementById('batch-status-select');
+            if (select) select.value = '';
+            if (!VALID_STATUS.includes(status)) return;
             const state = window.Lexicon.State;
-            const count = state.selectedIds.length;
-            state.articles.forEach(a => {
-                if (state.selectedIds.includes(a.id)) {
-                    a.status = status;
-                }
-            });
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
-            this.render();
-            const toastMsg = status === 'archived' && window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.batchMarkedRead', { count })
-                : `Updated status for ${count} documents`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            const selected = this._selectedSet();
+            const count = selected.size;
+            state.articles.forEach(a => { if (selected.has(a.id)) a.status = status; });
+            L().Storage.save();
+            L().Collections.render();
+            this.render({ keepLimit: true });
+            toast(status === 'archived'
+                ? tr('batch.batchMarkedRead', 'Marked {count} documents as read', { count })
+                : tr('batch.batchStatusUpdated', 'Status atualizado em {count} documentos', { count }), 'success');
         },
 
         batchSetCollection(colName) {
+            const select = document.getElementById('batch-collection-select');
+            if (select) select.value = '';
             if (!colName) return;
             if (colName === '__NEW__') {
                 this.batchCreateCollectionPrompt();
@@ -1079,319 +988,319 @@ window.Lexicon = window.Lexicon || {};
             }
 
             const state = window.Lexicon.State;
-            const count = state.selectedIds.length;
+            const selected = this._selectedSet();
+            const count = selected.size;
             const targetCol = colName === 'none' ? null : colName;
-            state.articles.forEach(a => {
-                if (state.selectedIds.includes(a.id)) {
-                    a.collection = targetCol;
-                }
-            });
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
-            this.render();
-            const colDisplay = targetCol || (window.Lexicon.I18n ? window.Lexicon.I18n.t('folders.unfiled') : 'General');
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.batchMoved', { count, name: colDisplay })
-                : `Moved ${count} documents to ${colDisplay}`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            state.articles.forEach(a => { if (selected.has(a.id)) a.collection = targetCol; });
+            L().Storage.save();
+            L().Collections.render();
+            this.render({ keepLimit: true });
+            const colDisplay = targetCol || tr('folders.unfiled', 'General');
+            toast(tr('batch.batchMoved', 'Moved {count} documents to {name}', { count, name: colDisplay }), 'success');
         },
 
         batchCreateCollectionPrompt() {
-            const state = window.Lexicon.State;
-            const n = (state.selectedIds || []).length;
+            const n = (window.Lexicon.State.selectedIds || []).length;
             if (n === 0) {
-                window.Lexicon.UI.Toast.show('Please select at least one document first', 'warning');
+                toast(tr('batch.selectFirst', 'Selecione pelo menos um documento primeiro'), 'warning');
                 return;
             }
-
             const subtitle = document.getElementById('batch-collection-modal-subtitle');
-            if (subtitle) {
-                subtitle.textContent = window.Lexicon.I18n ? window.Lexicon.I18n.t('batch.modalSubtitle') : `Create a new collection and move ${n} selected documents into it.`;
-            }
-
+            if (subtitle) subtitle.textContent = tr('batch.modalSubtitle', 'Create a new collection and move {count} selected documents into it.', { count: n });
             const input = document.getElementById('batch-new-collection-name');
             if (input) input.value = '';
-
-            window.Lexicon.UI.Modal.open('batch-collection-modal');
-            setTimeout(() => {
-                if (input) input.focus();
-            }, 100);
+            L().UI.Modal.open('batch-collection-modal', { focus: '#batch-new-collection-name' });
         },
 
         submitBatchCreateCollection() {
             const input = document.getElementById('batch-new-collection-name');
             if (!input) return;
-
             const name = input.value.trim();
             if (!name) {
-                window.Lexicon.UI.Toast.show(window.Lexicon.I18n ? window.Lexicon.I18n.t('collections.nameRequired') : 'Please enter a collection name', 'error');
+                toast(tr('collections.nameRequired', 'Please enter a collection name'), 'error');
                 return;
             }
-
             const state = window.Lexicon.State;
-            const count = (state.selectedIds || []).length;
+            const selected = this._selectedSet();
+            const count = selected.size;
             if (count === 0) {
-                window.Lexicon.UI.Modal.close('batch-collection-modal');
+                L().UI.Modal.close('batch-collection-modal');
                 return;
             }
-
-            // Get or create collection
-            window.Lexicon.Collections.getOrCreate(name);
-
-            // Assign selected documents to this collection
-            state.articles.forEach(a => {
-                if (state.selectedIds.includes(a.id)) {
-                    a.collection = name;
-                }
-            });
-
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
-            this.render();
-
-            window.Lexicon.UI.Modal.close('batch-collection-modal');
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.batchMoved', { count, name })
-                : `Created collection "${name}" and moved ${count} documents into it`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            const col = L().Collections.getOrCreate(name, { silent: true });
+            state.articles.forEach(a => { if (selected.has(a.id)) a.collection = col.name; });
+            L().Storage.save();
+            L().Collections.render();
+            L().Collections.populateSelects();
+            this.render({ keepLimit: true });
+            L().UI.Modal.close('batch-collection-modal');
+            toast(tr('batch.batchMoved', 'Moved {count} documents to {name}', { count, name: col.name }), 'success');
         },
 
         batchAddTag() {
             const state = window.Lexicon.State;
             if (!state.selectedIds || !state.selectedIds.length) return;
-
-            const tagPrompt = window.Lexicon.I18n ? window.Lexicon.I18n.t('inspector.tagPlaceholder') : "Enter tag to add to selected documents:";
-            const tag = window.prompt(tagPrompt);
+            const tag = window.prompt(tr('batch.tagPrompt', 'Tag a adicionar aos documentos selecionados:'));
             if (!tag || !tag.trim()) return;
-            const cleanTag = tag.trim().replace(/^#/, '');
+            const cleanTag = tag.trim().replace(/^#+/, '').slice(0, 40);
+            if (!cleanTag) return;
 
+            const selected = this._selectedSet();
             let updated = 0;
             state.articles.forEach(a => {
-                if (state.selectedIds.includes(a.id)) {
-                    a.tags = a.tags || [];
-                    if (!a.tags.includes(cleanTag)) {
-                        a.tags.push(cleanTag);
-                        updated++;
-                    }
+                if (!selected.has(a.id)) return;
+                a.tags = a.tags || [];
+                if (!a.tags.some(t => String(t).toLowerCase() === cleanTag.toLowerCase())) {
+                    a.tags.push(cleanTag);
+                    updated++;
                 }
             });
-            window.Lexicon.Storage.save();
-            this.render();
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.batchTagAdded', { tag: cleanTag, count: state.selectedIds.length })
-                : `Added tag #${cleanTag} to ${state.selectedIds.length} documents`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            L().Storage.save();
+            this.render({ keepLimit: true });
+            toast(tr('batch.batchTagAdded', 'Added tag #{tag} to {count} documents', { tag: cleanTag, count: updated }), 'success');
         },
 
         batchToggleFavorite(fav) {
             const state = window.Lexicon.State;
-            state.articles.forEach(a => {
-                if (state.selectedIds.includes(a.id)) {
-                    a.isFavorite = fav;
-                }
-            });
-            window.Lexicon.Storage.save();
-            this.render();
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.batchFavoritesUpdated', { count: state.selectedIds.length })
-                : `Updated favorites for ${state.selectedIds.length} documents`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            const selected = this._selectedSet();
+            state.articles.forEach(a => { if (selected.has(a.id)) a.isFavorite = !!fav; });
+            L().Storage.save();
+            this.render({ keepLimit: true });
+            toast(tr('batch.batchFavoritesUpdated', 'Updated favorites for {count} documents', { count: selected.size }), 'success');
         },
 
         async batchDelete() {
             const state = window.Lexicon.State;
-            const count = state.selectedIds.length;
+            const selected = this._selectedSet();
+            const count = selected.size;
             if (!count) return;
 
-            const confirmMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.confirmBatchDelete', { count })
-                : `Are you sure you want to delete ${count} selected documents from your library?`;
-            if (!confirm(confirmMsg)) {
+            if (!confirm(tr('batch.confirmBatchDelete', 'Are you sure you want to delete {count} selected documents from your library?', { count }))) {
                 return;
             }
 
-            for (const id of state.selectedIds) {
-                await window.Lexicon.Storage.deleteFile(id);
+            if (L().Reader && L().Reader.isOpen() && selected.has(L().Reader.getCurrentArticleId())) L().Reader.close();
+            if (selected.has(state.inspectedArticleId)) {
+                this._skipDirtyCheck = true;
+                L().UI.Modal.close('inspector-modal');
+                state.inspectedArticleId = null;
             }
 
-            state.articles = state.articles.filter(a => !state.selectedIds.includes(a.id));
+            await L().Storage.deleteFiles(Array.from(selected));
+            state.articles = state.articles.filter(a => !selected.has(a.id));
             state.selectedIds = [];
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
+            await L().Storage.save();
+            L().Collections.render();
             this.render();
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.batchDeleted', { count })
-                : `Deleted ${count} documents`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'info');
+            toast(tr('batch.batchDeleted', 'Deleted {count} documents', { count }), 'info');
         },
 
         batchExportNotes() {
             const state = window.Lexicon.State;
-            const selectedArticles = state.articles.filter(a => state.selectedIds.includes(a.id));
+            const selected = this._selectedSet();
+            const selectedArticles = state.articles.filter(a => selected.has(a.id));
             if (!selectedArticles.length) return;
 
-            let md = `# Consolidated Research Synthesis & Notes\nExported: ${new Date().toLocaleDateString()}\nTotal Documents: ${selectedArticles.length}\n\n---\n\n`;
+            const pt = !L().I18n || L().I18n.locale !== 'en-US';
+            const H = pt
+                ? { title: 'Síntese Consolidada de Pesquisa & Fichamentos', exported: 'Exportado', total: 'Total de documentos', authors: 'Autores', status: 'Status', collection: 'Coleção', summary: 'Resumo', unknown: 'Desconhecido', general: 'Geral' }
+                : { title: 'Consolidated Research Synthesis & Notes', exported: 'Exported', total: 'Total Documents', authors: 'Authors', status: 'Status', collection: 'Collection', summary: 'Summary', unknown: 'Unknown', general: 'General' };
+            const notesHeading = tr('inspector.notesTitle', 'Fichamento');
 
+            let md = `# ${H.title}\n${H.exported}: ${new Date().toLocaleDateString(pt ? 'pt-BR' : 'en-US')}\n${H.total}: ${selectedArticles.length}\n\n---\n\n`;
             selectedArticles.forEach(a => {
                 md += `## ${a.title}\n`;
-                md += `**Authors:** ${a.authors || 'Unknown'} (${a.year || 'N/A'}) | **Status:** ${a.status} | **Collection:** ${a.collection || 'General'}\n\n`;
-                if (a.summary) {
-                    md += `### Summary\n${a.summary}\n\n`;
-                }
-                if (a.notes) {
-                    const notesHeading = window.Lexicon.I18n ? window.Lexicon.I18n.t('inspector.notesTitle') : 'Fichamento';
-                    md += `### ${notesHeading}\n${a.notes}\n\n`;
-                }
+                md += `**${H.authors}:** ${a.authors || H.unknown} (${a.year || 'N/A'}) | **${H.status}:** ${this.getStatusLabel(a.status)} | **${H.collection}:** ${a.collection || H.general}\n\n`;
+                if (a.summary) md += `### ${H.summary}\n${a.summary}\n\n`;
+                if (a.notes) md += `### ${notesHeading}\n${a.notes}\n\n`;
                 md += `---\n\n`;
             });
 
-            const blob = new Blob([md], { type: 'text/markdown' });
+            this._downloadText(md, `Batch_Research_Notes_${U().localDateStr()}.md`, 'text/markdown;charset=utf-8');
+            toast(tr('batch.notesExported', 'Notas de {count} documentos exportadas', { count: selectedArticles.length }), 'success');
+        },
+
+        _downloadText(content, filename, type) {
+            const blob = new Blob([content], { type });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `Batch_Research_Notes_${new Date().toISOString().split('T')[0]}.md`;
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            window.Lexicon.UI.Toast.show(`Exported notes for ${selectedArticles.length} documents`, 'success');
+            setTimeout(() => URL.revokeObjectURL(url), 1500);
         },
 
         toggleFavorite(id) {
             const state = window.Lexicon.State;
-            const article = state.articles.find(a => a.id === id);
+            const article = state.articles.find(a => a.id === Number(id));
             if (!article) return;
 
             article.isFavorite = !article.isFavorite;
-            window.Lexicon.Storage.save();
-            this.render();
-
-            // Also update inspector modal star if currently open
-            if (state.inspectedArticleId === id) {
-                this.updateInspectorStar(article.isFavorite);
-            }
-
-            const msg = article.isFavorite ? 'Added to favorites' : 'Removed from favorites';
-            window.Lexicon.UI.Toast.show(msg, 'info');
+            L().Storage.save();
+            this.render({ keepLimit: true });
+            if (state.inspectedArticleId === article.id) this.updateInspectorStar(article.isFavorite);
+            toast(article.isFavorite ? tr('inspector.starAdded', 'Added to favorites') : tr('inspector.starRemoved', 'Removed from favorites'), 'info');
         },
 
         updateInspectorStar(isFavorite) {
             const starBtn = document.getElementById('inspector-star-btn');
             if (starBtn) {
                 starBtn.className = `p-2 rounded-xl transition-colors cursor-pointer ${isFavorite ? 'text-yellow-500 hover:text-yellow-600' : 'text-earth hover:text-soil'}`;
-                starBtn.innerHTML = `<i class="${isFavorite ? 'ph-fill' : 'ph'} ph-star text-xl"></i>`;
+                starBtn.setAttribute('aria-pressed', String(!!isFavorite));
+                starBtn.innerHTML = `<i class="${isFavorite ? 'ph-fill' : 'ph'} ph-star text-xl" aria-hidden="true"></i>`;
+            }
+        },
+
+        /* ------------------------------------------------------------------
+           Inspector
+           ------------------------------------------------------------------ */
+        _inspectorFieldValues() {
+            const v = (id) => {
+                const el = document.getElementById(id);
+                return el ? el.value : null;
+            };
+            return {
+                title: (v('inspector-title') || '').trim(),
+                authors: (v('inspector-author') || '').trim(),
+                year: (v('inspector-year') || '').trim(),
+                publication: (v('inspector-publication') || '').trim(),
+                doi: (v('inspector-doi') || '').trim(),
+                status: v('inspector-status') || '',
+                collection: v('inspector-collection') || '',
+                summary: (v('inspector-summary') || '').trim()
+            };
+        },
+
+        _articleFieldValues(article) {
+            return {
+                title: (article.title || '').trim(),
+                authors: (article.authors || '').trim(),
+                year: article.year ? String(article.year) : '',
+                publication: (article.publication || '').trim(),
+                doi: (article.doi || '').trim(),
+                status: article.status || 'inbox',
+                collection: article.collection || '',
+                summary: (article.summary || '').trim()
+            };
+        },
+
+        isInspectorDirty() {
+            const state = window.Lexicon.State;
+            const article = state.articles.find(a => a.id === state.inspectedArticleId);
+            if (!article || !L().UI.Modal.isOpen('inspector-modal')) return false;
+            return JSON.stringify(this._inspectorFieldValues()) !== JSON.stringify(this._articleFieldValues(article));
+        },
+
+        _setDoiLink(doi) {
+            const doiLinkEl = document.getElementById('inspector-doi-link');
+            if (!doiLinkEl) return;
+            const href = U().doiHref(doi);
+            if (href) {
+                doiLinkEl.href = href;
+                doiLinkEl.rel = 'noopener noreferrer';
+                doiLinkEl.classList.remove('hidden');
+            } else {
+                doiLinkEl.removeAttribute('href');
+                doiLinkEl.classList.add('hidden');
             }
         },
 
         /**
          * Open Document Overview & Inspector Modal
-         * Shows Summary, Metadata, File Location, and Prominent READ button
-         * @param {number|string} id
          */
         inspect(id) {
             const state = window.Lexicon.State;
             const article = state.articles.find(a => a.id === Number(id));
             if (!article) return;
 
+            // Switching from another open document: keep its pending notes
+            this.flushNotesSave();
+            if (L().UI.Modal.isOpen('inspector-modal') && state.inspectedArticleId !== article.id && this.isInspectorDirty()) {
+                if (window.confirm(tr('inspector.confirmSaveOnClose', 'Salvar as alterações feitas neste documento antes de fechar?\n\nOK = salvar • Cancelar = descartar'))) {
+                    this.saveInspected({ silent: true });
+                }
+            }
+
             state.inspectedArticleId = article.id;
 
-            // Populate Inspector Fields
-            const titleEl = document.getElementById('inspector-title');
-            const authorEl = document.getElementById('inspector-author');
-            const yearEl = document.getElementById('inspector-year');
-            const pubEl = document.getElementById('inspector-publication');
-            const doiEl = document.getElementById('inspector-doi');
-            const doiLinkEl = document.getElementById('inspector-doi-link');
-            const statusEl = document.getElementById('inspector-status');
-            const collectionEl = document.getElementById('inspector-collection');
-            const summaryEl = document.getElementById('inspector-summary');
-            const notesEl = document.getElementById('inspector-notes');
+            const set = (elId, value) => {
+                const el = document.getElementById(elId);
+                if (el) el.value = value;
+            };
+            set('inspector-title', article.title || '');
+            set('inspector-author', article.authors || '');
+            set('inspector-year', article.year || '');
+            set('inspector-publication', article.publication || '');
+            set('inspector-doi', article.doi || '');
+            set('inspector-status', VALID_STATUS.includes(article.status) ? article.status : 'inbox');
+            set('inspector-summary', article.summary || '');
+            set('inspector-notes', article.notes || '');
+            this._setDoiLink(article.doi);
+
+            const headerTitle = document.getElementById('inspector-modal-header-title');
+            if (headerTitle) {
+                headerTitle.textContent = article.title || '';
+                headerTitle.title = article.title || '';
+            }
+
+            if (L().Academic && typeof L().Academic.closeCiteMenu === 'function') L().Academic.closeCiteMenu();
+
+            L().Collections.fillSelect(document.getElementById('inspector-collection'), article.collection || '');
+
             const fileNameEl = document.getElementById('inspector-file-name');
             const filePathEl = document.getElementById('inspector-file-path');
             const fileSizeEl = document.getElementById('inspector-file-size');
             const fileIconEl = document.getElementById('inspector-file-icon');
-
-            if (titleEl) titleEl.value = article.title || '';
-            if (authorEl) authorEl.value = article.authors || '';
-            if (yearEl) yearEl.value = article.year || '';
-            if (pubEl) pubEl.value = article.publication || '';
-            if (doiEl) doiEl.value = article.doi || '';
-            
-            if (doiLinkEl) {
-                if (article.doi) {
-                    let doiUrl = article.doi;
-                    if (/arxiv/i.test(article.doi) || /^\d{4}\.\d{4,5}/.test(article.doi)) {
-                        const cleanArxiv = article.doi.replace(/^arxiv:\s*/i, '').replace(/^10\.48550\/arxiv\./i, '');
-                        doiUrl = `https://arxiv.org/abs/${cleanArxiv}`;
-                    } else if (!doiUrl.startsWith('http')) {
-                        doiUrl = `https://doi.org/${article.doi}`;
-                    }
-                    doiLinkEl.href = doiUrl;
-                    doiLinkEl.classList.remove('hidden');
-                } else {
-                    doiLinkEl.classList.add('hidden');
-                }
+            if (fileNameEl) fileNameEl.textContent = article.fileName || tr('inspector.noFileAttached', 'Nenhum arquivo anexado');
+            if (filePathEl) filePathEl.textContent = article.filePath || '';
+            if (fileSizeEl) {
+                fileSizeEl.textContent = article.fileSize || '';
+                fileSizeEl.classList.toggle('hidden', !article.fileSize);
             }
+            if (fileIconEl) fileIconEl.className = `ph ${fileTypeIcon(article)} text-2xl`;
+            this._refreshFileStatus(article);
 
-            if (window.Lexicon.Academic && typeof window.Lexicon.Academic.closeCiteMenu === 'function') {
-                window.Lexicon.Academic.closeCiteMenu();
-            }
-
-            if (statusEl) statusEl.value = article.status || 'inbox';
-            
-            // Populate collections dropdown
-            if (collectionEl) {
-                collectionEl.innerHTML = `
-                    <option value="">(None / Uncategorized)</option>
-                    ${state.collections.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}
-                `;
-                collectionEl.value = article.collection || '';
-            }
-
-            if (summaryEl) summaryEl.value = article.summary || '';
-            if (notesEl) notesEl.value = article.notes || '';
-
-            // File information
-            if (fileNameEl) fileNameEl.textContent = article.fileName || 'Document File';
-            if (filePathEl) filePathEl.textContent = article.filePath || article.fileName || 'Stored locally';
-            if (fileSizeEl) fileSizeEl.textContent = article.fileSize || 'Standard file';
-
-            if (fileIconEl) {
-                const iconClass = article.coverType === 'book' ? 'ph-book-bookmark text-terracotta' :
-                                 article.coverType === 'doc' ? 'ph-file-doc text-jungle' :
-                                 'ph-file-pdf text-terracotta';
-                fileIconEl.className = `ph ${iconClass} text-2xl`;
-            }
+            const indicatorEl = document.getElementById('notes-save-indicator');
+            if (indicatorEl) indicatorEl.textContent = tr('inspector.autoSaved', 'Salvo automaticamente');
 
             this.updateInspectorStar(article.isFavorite);
             this.renderInspectorTags(article.tags || []);
 
-            // Attach Zettelkasten autocomplete & Backlinks (Item 3.3)
-            if (window.Lexicon.Zettelkasten) {
-                if (notesEl) window.Lexicon.Zettelkasten.attach(notesEl);
+            const notesEl = document.getElementById('inspector-notes');
+            if (L().Zettelkasten) {
+                if (notesEl) L().Zettelkasten.attach(notesEl);
                 const backlinksContainer = document.getElementById('inspector-backlinks-container');
-                if (backlinksContainer) {
-                    window.Lexicon.Zettelkasten.renderBacklinks(article, backlinksContainer);
-                }
+                if (backlinksContainer) L().Zettelkasten.renderBacklinks(article, backlinksContainer);
             }
 
-            // Open the Modal
-            window.Lexicon.UI.Modal.open('inspector-modal');
+            L().UI.Modal.open('inspector-modal', { focus: '#inspector-title' });
         },
 
-        /**
-         * Render tag badges in the inspector modal
-         */
+        /** Show whether a binary file is really stored for this article */
+        async _refreshFileStatus(article) {
+            const filePathEl = document.getElementById('inspector-file-path');
+            if (!filePathEl) return;
+            const has = await L().Storage.hasFile(article.id);
+            if (window.Lexicon.State.inspectedArticleId !== article.id) return;
+            const pathText = article.filePath ? ` — ${article.filePath}` : '';
+            filePathEl.textContent = has
+                ? `${tr('inspector.fileStored', 'Armazenado neste navegador')}${pathText}`
+                : `${tr('inspector.fileMissing', 'Arquivo não armazenado — use "Vincular arquivo"')}${pathText}`;
+            filePathEl.classList.toggle('text-terracotta', !has);
+        },
+
         renderInspectorTags(tags) {
             const listEl = document.getElementById('inspector-tags-list');
             if (!listEl) return;
-
-            listEl.innerHTML = tags.map(tag => `
+            const removeLabel = esc(tr('inspector.removeTag', 'Remover tag'));
+            listEl.innerHTML = (tags || []).map(tag => `
                 <span class="tag-chip inline-flex items-center gap-1.5 py-1 px-2.5 bg-clay/70 border border-wood rounded-lg text-xs font-medium">
-                    #${window.Lexicon.Utils.escapeHTML(tag)}
-                    <button type="button" data-action="remove-inspected-tag" data-tag-name="${window.Lexicon.Utils.escapeHTML(tag)}" 
-                            class="hover:text-terracotta transition-colors text-earth cursor-pointer" title="Remove tag">
-                        <i class="ph ph-x text-xs"></i>
+                    #${esc(tag)}
+                    <button type="button" data-action="remove-inspected-tag" data-tag-name="${esc(tag)}"
+                            class="hover:text-terracotta transition-colors text-earth cursor-pointer" title="${removeLabel}" aria-label="${removeLabel} ${esc(tag)}">
+                        <i class="ph ph-x text-xs" aria-hidden="true"></i>
                     </button>
                 </span>
             `).join('');
@@ -1400,20 +1309,24 @@ window.Lexicon = window.Lexicon || {};
         addTagToInspected() {
             const input = document.getElementById('inspector-new-tag');
             if (!input || !input.value.trim()) return;
-
-            const tag = input.value.trim().replace(/^#/, '');
             const state = window.Lexicon.State;
             const article = state.articles.find(a => a.id === state.inspectedArticleId);
             if (!article) return;
 
+            const newTags = input.value.split(',').map(t => t.trim().replace(/^#+/, '').slice(0, 40)).filter(Boolean);
             article.tags = article.tags || [];
-            if (!article.tags.includes(tag)) {
-                article.tags.push(tag);
+            let changed = false;
+            newTags.forEach(tag => {
+                if (!article.tags.some(t => String(t).toLowerCase() === tag.toLowerCase())) {
+                    article.tags.push(tag);
+                    changed = true;
+                }
+            });
+            if (changed) {
                 this.renderInspectorTags(article.tags);
-                window.Lexicon.Storage.save();
-                this.render();
+                L().Storage.save();
+                this.render({ keepLimit: true });
             }
-
             input.value = '';
         },
 
@@ -1421,64 +1334,76 @@ window.Lexicon = window.Lexicon || {};
             const state = window.Lexicon.State;
             const article = state.articles.find(a => a.id === state.inspectedArticleId);
             if (!article || !article.tags) return;
-
             article.tags = article.tags.filter(t => t !== tag);
             this.renderInspectorTags(article.tags);
-            window.Lexicon.Storage.save();
-            this.render();
+            L().Storage.save();
+            this.render({ keepLimit: true });
         },
 
         /**
          * Save edits made inside the Inspector modal
+         * @param {{silent?: boolean}} [opts]
          */
-        saveInspected() {
+        saveInspected(opts = {}) {
             const state = window.Lexicon.State;
             const article = state.articles.find(a => a.id === state.inspectedArticleId);
-            if (!article) return;
+            if (!article) return false;
 
-            const titleEl = document.getElementById('inspector-title');
-            const authorEl = document.getElementById('inspector-author');
-            const yearEl = document.getElementById('inspector-year');
-            const pubEl = document.getElementById('inspector-publication');
-            const doiEl = document.getElementById('inspector-doi');
-            const statusEl = document.getElementById('inspector-status');
-            const collectionEl = document.getElementById('inspector-collection');
-            const summaryEl = document.getElementById('inspector-summary');
-            const notesEl = document.getElementById('inspector-notes');
+            const f = this._inspectorFieldValues();
+            const oldTitle = article.title;
 
-            if (titleEl && titleEl.value.trim()) article.title = titleEl.value.trim();
-            if (authorEl) article.authors = authorEl.value.trim();
-            if (yearEl) article.year = parseInt(yearEl.value) || new Date().getFullYear();
-            if (pubEl) article.publication = pubEl.value.trim();
-            if (doiEl) {
-                article.doi = doiEl.value.trim();
-                const doiLinkEl = document.getElementById('inspector-doi-link');
-                if (doiLinkEl) {
-                    if (article.doi) {
-                        let doiUrl = article.doi;
-                        if (/arxiv/i.test(article.doi) || /^\d{4}\.\d{4,5}/.test(article.doi)) {
-                            const cleanArxiv = article.doi.replace(/^arxiv:\s*/i, '').replace(/^10\.48550\/arxiv\./i, '');
-                            doiUrl = `https://arxiv.org/abs/${cleanArxiv}`;
-                        } else if (!doiUrl.startsWith('http')) {
-                            doiUrl = `https://doi.org/${article.doi}`;
-                        }
-                        doiLinkEl.href = doiUrl;
-                        doiLinkEl.classList.remove('hidden');
-                    } else {
-                        doiLinkEl.classList.add('hidden');
-                    }
+            if (f.title) article.title = f.title;
+            article.authors = f.authors;
+            if (f.year) {
+                const y = parseInt(f.year, 10);
+                if (!Number.isFinite(y) || y < 1000 || y > new Date().getFullYear() + 5) {
+                    toast(tr('inspector.invalidYear', 'Ano inválido: {year}', { year: f.year }), 'error');
+                    return false;
                 }
+                article.year = y;
+            } else {
+                article.year = null;
             }
-            if (statusEl) article.status = statusEl.value;
-            if (collectionEl) article.collection = collectionEl.value || null;
-            if (summaryEl) article.summary = summaryEl.value.trim();
+            article.publication = f.publication;
+            article.doi = f.doi;
+            this._setDoiLink(article.doi);
+            if (VALID_STATUS.includes(f.status)) article.status = f.status;
+            article.collection = f.collection || null;
+            article.summary = f.summary;
+            const notesEl = document.getElementById('inspector-notes');
             if (notesEl) article.notes = notesEl.value;
 
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
-            this.render();
+            let relinked = 0;
+            if (oldTitle !== article.title && L().Zettelkasten && L().Zettelkasten.renameTitleReferences) {
+                relinked = L().Zettelkasten.renameTitleReferences(oldTitle, article.title, article.id);
+            }
 
-            window.Lexicon.UI.Toast.show('Document details saved', 'success');
+            const headerTitle = document.getElementById('inspector-modal-header-title');
+            if (headerTitle) headerTitle.textContent = article.title;
+
+            L().Storage.save();
+            L().Collections.render();
+            this.render({ keepLimit: true });
+
+            if (!opts.silent) {
+                toast(tr('inspector.savedToast', 'Detalhes do documento salvos') +
+                    (relinked ? ` • ${tr('inspector.linksUpdated', '{count} wikilinks atualizados', { count: relinked })}` : ''), 'success');
+            }
+            return true;
+        },
+
+        /** Save and close (Save button) */
+        saveAndCloseInspector() {
+            if (this.saveInspected()) {
+                this._skipDirtyCheck = true;
+                L().UI.Modal.close('inspector-modal');
+            }
+        },
+
+        /** Discard changes and close (Cancel button) */
+        cancelInspector() {
+            this._skipDirtyCheck = true;
+            L().UI.Modal.close('inspector-modal');
         },
 
         /**
@@ -1491,133 +1416,116 @@ window.Lexicon = window.Lexicon || {};
             const indicatorEl = document.getElementById('notes-save-indicator');
             if (!article || !notesEl) return;
 
-            article.notes = notesEl.value;
-
-            if (indicatorEl) indicatorEl.textContent = 'Saving...';
+            article.notes = notesEl.value; // bound to this article now (not when the timer fires)
+            if (indicatorEl) indicatorEl.textContent = tr('inspector.saving', 'Salvando...');
 
             clearTimeout(this._noteDebounce);
             this._noteDebounce = setTimeout(() => {
-                window.Lexicon.Storage.save();
-                if (indicatorEl) indicatorEl.textContent = 'Auto-saved';
+                this._noteDebounce = null;
+                L().Storage.save().then(ok => {
+                    if (indicatorEl) indicatorEl.textContent = ok ? tr('inspector.autoSaved', 'Salvo automaticamente') : tr('inspector.saveFailed', 'Falha ao salvar');
+                });
             }, 500);
         },
 
-        /**
-         * Insert Markdown formatting into the inspector notes textarea
-         * @param {string} format
-         */
-        insertNotesFormatting(format) {
-            const textarea = document.getElementById('inspector-notes');
-            if (!textarea) return;
+        flushNotesSave() {
+            if (this._noteDebounce) {
+                clearTimeout(this._noteDebounce);
+                this._noteDebounce = null;
+                L().Storage.save();
+            }
+        },
 
+        /**
+         * Shared Markdown formatting helper for note textareas
+         * @returns {boolean}
+         */
+        applyFormatting(textarea, format) {
+            if (!textarea) return false;
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
             const text = textarea.value;
             const selection = text.substring(start, end);
-
             let replacement = '';
             let cursorOffset = 0;
 
             switch (format) {
                 case 'bold':
-                    replacement = `**${selection || 'bold text'}**`;
+                    replacement = `**${selection || tr('format.bold', 'texto em negrito')}**`;
                     cursorOffset = selection ? replacement.length : 2;
                     break;
                 case 'italic':
-                    replacement = `*${selection || 'italic text'}*`;
+                    replacement = `*${selection || tr('format.italic', 'texto em itálico')}*`;
                     cursorOffset = selection ? replacement.length : 1;
                     break;
                 case 'h2':
-                    replacement = `\n## ${selection || 'Section Heading'}\n`;
+                    replacement = `\n\n## ${selection || tr('format.heading', 'Título da seção')}\n`;
                     cursorOffset = replacement.length;
                     break;
                 case 'quote':
-                    replacement = `\n> "${selection || 'Key quotation or citation'}"\n`;
+                    replacement = `\n> "${selection || tr('format.quote', 'Citação textual do autor')}"\n`;
                     cursorOffset = replacement.length;
                     break;
                 case 'bullet':
-                    replacement = `\n- ${selection || 'Point / takeaway'}\n`;
+                    replacement = `\n- ${selection || tr('format.bullet', 'Ponto importante')}`;
                     cursorOffset = replacement.length;
                     break;
                 case 'date':
-                    const today = new Date().toISOString().split('T')[0];
-                    replacement = `[${today}] `;
+                    replacement = ` [${U().localDateStr()}] `;
                     cursorOffset = replacement.length;
                     break;
+                default:
+                    return false;
             }
 
             textarea.value = text.substring(0, start) + replacement + text.substring(end);
             textarea.focus();
             textarea.setSelectionRange(start + cursorOffset, start + cursorOffset);
-            this.autoSaveNotes();
+            return true;
         },
 
-        /**
-         * Insert quick citation block into notes (> "text" (p. X - DD/MM/YYYY))
-         */
+        insertNotesFormatting(format) {
+            if (this.applyFormatting(document.getElementById('inspector-notes'), format)) this.autoSaveNotes();
+        },
+
         insertQuickCitation() {
-            if (window.Lexicon.Reader && window.Lexicon.Reader.isOpen()) {
-                window.Lexicon.Reader.insertQuickCitation();
-            } else {
-                const notesEl = document.getElementById('inspector-notes');
-                if (!notesEl) return;
-                const start = notesEl.selectionStart;
-                const end = notesEl.selectionEnd;
-                const text = notesEl.value;
-                const selected = text.substring(start, end).trim();
-
-                const pageNum = prompt('Digite o número da página citada (ou deixe em branco):', '1');
-                if (pageNum === null) return;
-
-                const now = new Date();
-                const dateStr = now.toLocaleDateString('pt-BR');
-                const pageRef = pageNum ? `(p. ${pageNum.trim()} - ${dateStr})` : `(${dateStr})`;
-                const quoteText = selected || 'trecho citado do documento...';
-                const citationBlock = `\n\n> "${quoteText}" ${pageRef}\n\n`;
-
-                notesEl.value = text.substring(0, start) + citationBlock + text.substring(end);
-                const nextCursor = start + citationBlock.length;
-                notesEl.setSelectionRange(nextCursor, nextCursor);
-                notesEl.focus();
-                this.autoSaveNotes();
-                window.Lexicon.UI.Toast.show('Citação formatada inserida no fichamento', 'info');
-            }
+            if (L().Reader) L().Reader.insertQuickCitation();
         },
 
-        /**
-         * Export consolidated structured markdown note
-         */
         exportConsolidatedMarkdown() {
-            if (window.Lexicon.Academic && typeof window.Lexicon.Academic.exportConsolidatedMarkdown === 'function') {
-                window.Lexicon.Academic.exportConsolidatedMarkdown();
+            this.flushNotesSave();
+            if (L().Academic && typeof L().Academic.exportConsolidatedMarkdown === 'function') {
+                L().Academic.exportConsolidatedMarkdown();
             } else {
                 this.exportNotesForInspected();
             }
         },
 
-        /**
-         * The Primary Read Action: Opens the document in Integrated Split-View Reader (Phase 3)
-         * @param {number|string} [articleId]
-         */
+        /* ------------------------------------------------------------------
+           Reading
+           ------------------------------------------------------------------ */
         async openDocumentForReading(articleId) {
             const state = window.Lexicon.State;
             const id = Number(articleId || state.inspectedArticleId);
             const article = state.articles.find(a => a.id === id);
             if (!article) return;
-
-            // Automatically open in Integrated Split-View Reader!
-            if (window.Lexicon.Reader) {
-                window.Lexicon.Reader.open(article.id);
+            this.flushNotesSave();
+            if (L().UI.Modal.isOpen('inspector-modal') && this.isInspectorDirty()) {
+                this.saveInspected({ silent: true });
+            }
+            this._skipDirtyCheck = true;
+            if (L().Reader) {
+                await L().Reader.open(article.id);
+                this._skipDirtyCheck = false;
                 return;
             }
-
-            // Fallback to external tab
+            this._skipDirtyCheck = false;
             this.openDocumentInExternalTab(article.id);
         },
 
         /**
-         * Opens document directly in external browser tab
-         * @param {number|string} [articleId]
+         * Opens the document in a new browser tab (or downloads formats the browser can't show).
+         * The tab is opened synchronously so popup blockers don't block it after awaits.
          */
         async openDocumentInExternalTab(articleId) {
             const state = window.Lexicon.State;
@@ -1625,102 +1533,125 @@ window.Lexicon = window.Lexicon || {};
             const article = state.articles.find(a => a.id === id);
             if (!article) return;
 
-            // Automatically transition from inbox to reading
+            const ext = U().fileExt(article.fileName);
+            const canDisplay = !article.fileName || RENDERABLE_EXTS.includes(ext) || ext === '';
+            const win = canDisplay ? window.open('about:blank', '_blank') : null;
+
             if (article.status === 'inbox') {
                 article.status = 'reading';
                 const statusEl = document.getElementById('inspector-status');
-                if (statusEl) statusEl.value = 'reading';
-                window.Lexicon.Storage.save();
-                window.Lexicon.Collections.render();
-                this.render();
+                if (statusEl && state.inspectedArticleId === article.id) statusEl.value = 'reading';
+                L().Storage.save();
+                L().Collections.render();
+                this.render({ keepLimit: true });
             }
 
-            // 1. Check IndexedDB for the real stored file
-            const storedFile = await window.Lexicon.Storage.getFile(article.id);
+            const storedFile = await L().Storage.getFile(article.id);
             if (storedFile) {
-                const objectUrl = URL.createObjectURL(storedFile);
-                window.open(objectUrl, '_blank');
+                const fileExt = U().fileExt(storedFile.name || article.fileName);
+                const displayable = storedFile.type === 'application/pdf' || RENDERABLE_EXTS.includes(fileExt) || /^text\/|^image\//.test(storedFile.type || '');
+                const blob = (fileExt === 'txt' || fileExt === 'md')
+                    ? new Blob([await storedFile.text()], { type: 'text/plain;charset=utf-8' })
+                    : storedFile;
+                const objectUrl = URL.createObjectURL(blob);
+                if (displayable && win && fileExt !== 'epub') {
+                    win.location.href = objectUrl;
+                } else {
+                    if (win) win.close();
+                    const a = document.createElement('a');
+                    a.href = objectUrl;
+                    a.download = storedFile.name || article.fileName || 'document';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                }
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
                 return;
             }
 
-            // 2. If no binary file stored yet (e.g. sample items or DOI entry)
-            // Generate a high-fidelity formatted document tab
-            const htmlContent = `
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                    <meta charset="UTF-8">
-                    <title>${window.Lexicon.Utils.escapeHTML(article.title)}</title>
-                    <style>
-                        body { font-family: 'Merriweather', Georgia, serif; line-height: 1.8; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #2D251F; background: #FCFAF8; }
-                        header { border-bottom: 2px solid #D1C7B7; padding-bottom: 20px; margin-bottom: 30px; }
-                        h1 { font-size: 28px; line-height: 1.3; color: #1B4332; margin-bottom: 8px; }
-                        .meta { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; color: #4A4036; margin-bottom: 12px; }
-                        .file-notice { background: #E6DFD3; padding: 12px 16px; border-radius: 8px; font-family: sans-serif; font-size: 13px; margin: 20px 0; }
-                        .section-title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold; color: #2D6A4F; margin-top: 30px; margin-bottom: 8px; }
-                        .summary { font-size: 17px; color: #2D251F; }
-                        .notes { background: #F4F1EA; border-left: 4px solid #2D6A4F; padding: 15px; border-radius: 0 8px 8px 0; margin-top: 15px; font-family: sans-serif; font-size: 14px; white-space: pre-wrap; }
-                        .btn-relink { display: inline-block; margin-top: 15px; padding: 8px 16px; background: #2D6A4F; color: #fff; text-decoration: none; border-radius: 6px; font-family: sans-serif; font-size: 13px; font-weight: bold; }
-                    </style>
-                </head>
-                <body>
-                    <header>
-                        <h1>${window.Lexicon.Utils.escapeHTML(article.title)}</h1>
-                        <div class="meta"><strong>Authors:</strong> ${window.Lexicon.Utils.escapeHTML(String(article.authors)) || 'Unknown'} | <strong>Year:</strong> ${window.Lexicon.Utils.escapeHTML(String(article.year)) || 'N/A'} | <strong>Publication:</strong> ${window.Lexicon.Utils.escapeHTML(String(article.publication)) || 'Academic Reference'}</div>
-                        ${article.doi ? `<div class="meta"><strong>DOI / Link:</strong> <a href="${article.doi.startsWith('http') ? article.doi : 'https://doi.org/' + article.doi}" target="_blank">${article.doi}</a></div>` : ''}
-                    </header>
-                    <div class="file-notice">
-                        <strong>File Reference:</strong> <code>${article.filePath || article.fileName || 'No disk file attached'}</code>
-                        <br><small>To read the full binary PDF file, attach your local PDF file using the "Re-link File" button in the document manager.</small>
-                    </div>
-                    <div class="section-title">Abstract & Summary</div>
-                    <div class="summary">${window.Lexicon.Utils.escapeHTML(String(article.summary)) || 'No summary available.'}</div>
-                    ${article.notes ? `
-                        <div class="section-title">${window.Lexicon.I18n ? window.Lexicon.I18n.t('inspector.notesTitle') : 'Fichamento'}</div>
-                        <div class="notes">${article.notes}</div>
-                    ` : ''}
-                </body>
-                </html>
-            `;
-            const blob = new Blob([htmlContent], { type: 'text/html' });
-            const tempUrl = URL.createObjectURL(blob);
-            window.open(tempUrl, '_blank');
+            // No binary stored: open a static, script-free summary page
+            const notesTitle = tr('inspector.notesTitle', 'Fichamento');
+            const href = U().doiHref(article.doi);
+            const htmlContent = `<!DOCTYPE html>
+<html lang="${esc((L().I18n && L().I18n.locale) || 'pt-BR')}">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<title>${esc(article.title)}</title>
+<style>
+    body { font-family: Georgia, serif; line-height: 1.8; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #2D251F; background: #FCFAF8; }
+    header { border-bottom: 2px solid #D1C7B7; padding-bottom: 20px; margin-bottom: 30px; }
+    h1 { font-size: 28px; line-height: 1.3; color: #1B4332; margin-bottom: 8px; }
+    .meta { font-family: system-ui, sans-serif; font-size: 14px; color: #4A4036; margin-bottom: 12px; }
+    .file-notice { background: #E6DFD3; padding: 12px 16px; border-radius: 8px; font-family: sans-serif; font-size: 13px; margin: 20px 0; }
+    .section-title { font-family: system-ui, sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold; color: #2D6A4F; margin-top: 30px; margin-bottom: 8px; }
+    .summary { font-size: 17px; white-space: pre-wrap; }
+    .notes { background: #F4F1EA; border-left: 4px solid #2D6A4F; padding: 15px; border-radius: 0 8px 8px 0; margin-top: 15px; font-family: sans-serif; font-size: 14px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+    <header>
+        <h1>${esc(article.title)}</h1>
+        <div class="meta"><strong>${esc(tr('reader.authors', 'Autores'))}:</strong> ${disp(article.authors, '—')} | <strong>${esc(tr('reader.year', 'Ano'))}:</strong> ${disp(article.year, 'N/A')} | <strong>${esc(tr('reader.publication', 'Publicação'))}:</strong> ${disp(article.publication, '—')}</div>
+        ${article.doi ? `<div class="meta"><strong>DOI / Link:</strong> ${href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(article.doi)}</a>` : esc(article.doi)}</div>` : ''}
+    </header>
+    <div class="file-notice">
+        <strong>${esc(tr('reader.fileReference', 'Referência do arquivo'))}:</strong> <code>${disp(article.filePath || article.fileName, tr('inspector.noFileAttached', 'Nenhum arquivo anexado'))}</code>
+        <br><small>${esc(tr('reader.attachHint', 'Para ler o arquivo completo, anexe-o com "Vincular arquivo" no inspetor.'))}</small>
+    </div>
+    <div class="section-title">${esc(tr('reader.abstractTitle', 'Resumo / Abstract'))}</div>
+    <div class="summary">${disp(article.summary, tr('reader.noSummaryShort', 'Sem resumo.'))}</div>
+    ${article.notes ? `<div class="section-title">${esc(notesTitle)}</div><div class="notes">${esc(article.notes)}</div>` : ''}
+</body>
+</html>`;
+            const tempUrl = URL.createObjectURL(new Blob([htmlContent], { type: 'text/html;charset=utf-8' }));
+            if (win) win.location.href = tempUrl;
+            else window.open(tempUrl, '_blank', 'noopener');
+            setTimeout(() => URL.revokeObjectURL(tempUrl), 60 * 1000);
         },
 
         /**
-         * Prompt user to re-link or attach an actual file from their computer
+         * Prompt user to attach or replace the binary file of the inspected document
          */
         async relinkFileForInspected() {
             const state = window.Lexicon.State;
-            const article = state.articles.find(a => a.id === state.inspectedArticleId);
-            if (!article) return;
+            const targetId = state.inspectedArticleId;
+            if (!state.articles.some(a => a.id === targetId)) return;
 
             const input = document.createElement('input');
             input.type = 'file';
-            input.accept = '.pdf,.epub,.doc,.docx,.txt,.md';
+            input.accept = SUPPORTED_EXTS.map(e => `.${e}`).join(',');
             input.onchange = async (e) => {
-                const file = e.target.files[0];
+                const file = e.target.files && e.target.files[0];
                 if (!file) return;
+                const article = state.articles.find(a => a.id === targetId);
+                if (!article) return;
+
+                const ok = await L().Storage.storeFile(article.id, file);
+                if (!ok) return; // error already reported; keep previous metadata
 
                 article.fileName = file.name;
-                article.fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-                article.filePath = file.name;
-                if (file.name.endsWith('.pdf')) article.coverType = 'pdf';
-                else if (file.name.endsWith('.epub')) article.coverType = 'book';
+                article.fileSize = U().formatBytes(file.size);
+                article.filePath = file.webkitRelativePath || file.name;
+                article.coverType = this.getCoverType(file.name);
+                if (L().PDFExtractor) await L().PDFExtractor.invalidate(article.id);
+                await L().Storage.save();
 
-                await window.Lexicon.Storage.storeFile(article.id, file);
-                window.Lexicon.Storage.save();
-
-                // Update inspector display
-                const fileNameEl = document.getElementById('inspector-file-name');
-                const filePathEl = document.getElementById('inspector-file-path');
-                const fileSizeEl = document.getElementById('inspector-file-size');
-                if (fileNameEl) fileNameEl.textContent = article.fileName;
-                if (filePathEl) filePathEl.textContent = article.filePath;
-                if (fileSizeEl) fileSizeEl.textContent = article.fileSize;
-
-                this.render();
-                window.Lexicon.UI.Toast.show('File linked successfully! Click READ to open.', 'success');
+                if (state.inspectedArticleId === article.id) {
+                    const fileNameEl = document.getElementById('inspector-file-name');
+                    const fileSizeEl = document.getElementById('inspector-file-size');
+                    const fileIconEl = document.getElementById('inspector-file-icon');
+                    if (fileNameEl) fileNameEl.textContent = article.fileName;
+                    if (fileSizeEl) {
+                        fileSizeEl.textContent = article.fileSize;
+                        fileSizeEl.classList.remove('hidden');
+                    }
+                    if (fileIconEl) fileIconEl.className = `ph ${fileTypeIcon(article)} text-2xl`;
+                    this._refreshFileStatus(article);
+                }
+                if (L().Reader) await L().Reader.refreshIfShowing(article.id);
+                this.render({ keepLimit: true });
+                toast(tr('inspector.fileLinked', 'Arquivo vinculado! Clique em LER para abrir.'), 'success');
             };
             input.click();
         },
@@ -1732,22 +1663,12 @@ window.Lexicon = window.Lexicon || {};
             const state = window.Lexicon.State;
             const article = state.articles.find(a => a.id === state.inspectedArticleId);
             if (!article) return;
-
-            const notesHeading = window.Lexicon.I18n ? window.Lexicon.I18n.t('inspector.notesTitle') : 'Fichamento';
-            const summaryHeading = window.Lexicon.I18n ? window.Lexicon.I18n.t('inspector.summaryTab') : 'Abstract & Summary';
-            const mdContent = `# ${notesHeading}: ${window.Lexicon.Utils.escapeHTML(article.title)}\n\n**Authors:** ${window.Lexicon.Utils.escapeHTML(String(article.authors)) || 'Unknown'}\n**Year:** ${window.Lexicon.Utils.escapeHTML(String(article.year)) || 'N/A'}\n**Collection:** ${window.Lexicon.Utils.escapeHTML(String(article.collection)) || 'General'}\n**File Reference:** ${window.Lexicon.Utils.escapeHTML(String(article.fileName)) || 'N/A'}\n\n## ${summaryHeading}\n${window.Lexicon.Utils.escapeHTML(String(article.summary)) || 'N/A'}\n\n## ${notesHeading}\n${article.notes || 'No notes written yet.'}\n`;
-
-            const blob = new Blob([mdContent], { type: 'text/markdown' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            const cleanTitle = (article.title || 'document').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-            a.href = url;
-            a.download = `Notes_${cleanTitle}.md`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            window.Lexicon.UI.Toast.show('Notes exported as Markdown', 'success');
+            const notesHeading = tr('inspector.notesTitle', 'Fichamento');
+            const summaryHeading = tr('inspector.summaryTab', 'Abstract & Summary');
+            const md = `# ${notesHeading}: ${article.title}\n\n**${tr('reader.authors', 'Autores')}:** ${article.authors || '—'}\n**${tr('reader.year', 'Ano')}:** ${article.year || 'N/A'}\n**${tr('inspector.fieldCollection', 'Collection')}:** ${article.collection || '—'}\n**${tr('reader.fileReference', 'Arquivo')}:** ${article.fileName || '—'}\n\n## ${summaryHeading}\n${article.summary || '—'}\n\n## ${notesHeading}\n${article.notes || '—'}\n`;
+            const cleanTitle = U().fold(article.title || 'document').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || String(article.id);
+            this._downloadText(md, `Notes_${cleanTitle}.md`, 'text/markdown;charset=utf-8');
+            toast(tr('inspector.notesExported', 'Notas exportadas em Markdown'), 'success');
         },
 
         /**
@@ -1758,101 +1679,162 @@ window.Lexicon = window.Lexicon || {};
             const article = state.articles.find(a => a.id === state.inspectedArticleId);
             if (!article) return;
 
-            if (!confirm(`Are you sure you want to remove "${window.Lexicon.Utils.escapeHTML(article.title)}" from your library catalog?`)) {
+            if (!confirm(tr('inspector.confirmDelete', 'Remover "{title}" do acervo? O arquivo armazenado também será apagado.', { title: article.title }))) {
                 return;
             }
 
-            await window.Lexicon.Storage.deleteFile(article.id);
-            state.articles = state.articles.filter(a => a.id !== article.id);
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
-            this.render();
+            if (L().Reader && L().Reader.getCurrentArticleId() === article.id) L().Reader.close();
+            this._skipDirtyCheck = true;
+            L().UI.Modal.close('inspector-modal');
 
-            window.Lexicon.UI.Modal.close('inspector-modal');
-            window.Lexicon.UI.Toast.show('Document removed from catalog', 'info');
+            await L().Storage.deleteFile(article.id);
+            state.articles = state.articles.filter(a => a.id !== article.id);
+            state.selectedIds = (state.selectedIds || []).filter(id => id !== article.id);
+            state.inspectedArticleId = null;
+            await L().Storage.save();
+            L().Collections.render();
+            this.render({ keepLimit: true });
+            toast(tr('inspector.deletedToast', 'Documento removido do acervo'), 'info');
         },
 
-        /**
-         * Handle submission of "Add Document" modal
-         */
-        async handleAddArticleSubmit() {
+        /* ------------------------------------------------------------------
+           Add single document
+           ------------------------------------------------------------------ */
+
+        /** Called by the app when a file is chosen in the single-upload form */
+        async prefillFromFile(file) {
             const titleInput = document.getElementById('form-title');
-            const authorInput = document.getElementById('form-author');
             const yearInput = document.getElementById('form-year');
-            const pubInput = document.getElementById('form-pub');
-            const doiInput = document.getElementById('form-doi');
-            const statusSelect = document.getElementById('form-status');
-            const collectionSelect = document.getElementById('form-collection');
+            const authorInput = document.getElementById('form-author');
             const summaryInput = document.getElementById('form-summary');
+            const fileNameDisplay = document.getElementById('selected-file-name');
+            if (!file) return;
+
+            if (fileNameDisplay) {
+                fileNameDisplay.textContent = tr('upload.selectedFile', 'Selecionado: {name} ({size})', { name: file.name, size: U().formatBytes(file.size) });
+            }
+            const autoTitle = this.cleanTitle(file.name);
+            if (titleInput && !titleInput.value.trim()) titleInput.value = autoTitle;
+            const yearFromName = this.extractYear(file.name);
+            if (yearInput && !yearInput.value && yearFromName) yearInput.value = yearFromName;
+
+            formExtraction = null;
+            if (U().fileExt(file.name) === 'pdf' && L().PDFExtractor) {
+                try {
+                    const extracted = await L().PDFExtractor.extractFromBlob(file);
+                    const currentInput = document.getElementById('file-upload');
+                    const stillSelected = currentInput && currentInput.files && currentInput.files[0] === file;
+                    if (!extracted || (!stillSelected && this._pendingDroppedFile !== file)) return;
+                    formExtraction = { file, result: extracted };
+                    if (extracted.title && titleInput && (!titleInput.value.trim() || titleInput.value === autoTitle)) titleInput.value = extracted.title;
+                    if (extracted.authors && authorInput && !authorInput.value.trim()) authorInput.value = extracted.authors;
+                    if (extracted.year && yearInput && !yearInput.value) yearInput.value = extracted.year;
+                    if (extracted.abstract && summaryInput && !summaryInput.value.trim()) summaryInput.value = extracted.abstract;
+                } catch (e) {
+                    console.warn('[Articles] PDF extraction error:', e);
+                }
+            }
+        },
+
+        resetAddForm() {
+            const form = document.getElementById('add-article-form');
+            if (form) form.reset();
+            const fileNameDisplay = document.getElementById('selected-file-name');
+            if (fileNameDisplay) fileNameDisplay.textContent = '';
+            formExtraction = null;
+            this._pendingDroppedFile = null;
+            if (L().Academic && L().Academic.clearPendingUploadMeta) L().Academic.clearPendingUploadMeta();
+        },
+
+        async handleAddArticleSubmit() {
+            const v = (id) => {
+                const el = document.getElementById(id);
+                return el ? String(el.value || '').trim() : '';
+            };
             const fileInput = document.getElementById('file-upload');
             const submitBtn = document.getElementById('submit-article-btn');
 
-            const title = titleInput ? titleInput.value.trim() : '';
+            const title = v('form-title');
             if (!title) {
-                window.Lexicon.UI.Toast.show('Please enter a document title', 'warning');
+                toast(tr('upload.titleRequired', 'Informe o título do documento'), 'warning');
+                const t = document.getElementById('form-title');
+                if (t) t.focus();
                 return;
             }
+            if (this._submitting) return;
+            this._submitting = true;
 
-            const originalBtnText = submitBtn.textContent;
-            submitBtn.textContent = 'Registering...';
-            submitBtn.disabled = true;
-
-            const file = fileInput && fileInput.files ? fileInput.files[0] : null;
-            const articleId = Date.now();
-
-            let fileName = 'Manual entry';
-            let fileSize = '—';
-            let filePath = 'Local file';
-            let coverType = 'pdf';
-
-            if (file) {
-                fileName = file.name;
-                fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-                filePath = file.webkitRelativePath || file.name;
-                if (file.name.endsWith('.epub')) coverType = 'book';
-                else if (file.name.endsWith('.doc') || file.name.endsWith('.docx')) coverType = 'doc';
-
-                // Save binary file into IndexedDB
-                await window.Lexicon.Storage.storeFile(articleId, file);
+            const originalBtnText = submitBtn ? submitBtn.textContent : '';
+            if (submitBtn) {
+                submitBtn.textContent = tr('upload.registering', 'Registrando...');
+                submitBtn.disabled = true;
             }
 
-            const col = collectionSelect && collectionSelect.value !== 'none' && collectionSelect.value !== '' ? collectionSelect.value : null;
+            try {
+                const file = (fileInput && fileInput.files && fileInput.files[0]) || this._pendingDroppedFile || null;
+                const articleId = U().newArticleId();
+                const yearRaw = parseInt(v('form-year'), 10);
+                const statusRaw = v('form-status');
+                const colRaw = v('form-collection');
 
-            const newArticle = {
-                id: articleId,
-                title: title,
-                authors: authorInput && authorInput.value.trim() ? authorInput.value.trim() : 'Unknown',
-                year: parseInt(yearInput && yearInput.value ? yearInput.value : new Date().getFullYear()),
-                publication: pubInput && pubInput.value.trim() ? pubInput.value.trim() : '',
-                doi: doiInput && doiInput.value.trim() ? doiInput.value.trim() : '',
-                status: statusSelect ? statusSelect.value : 'inbox',
-                collection: col,
-                tags: ['New', file ? file.name.split('.').pop().toUpperCase() : 'Document'],
-                addedDate: new Date().toISOString().split('T')[0],
-                isFavorite: false,
-                coverType: coverType,
-                fileName: fileName,
-                fileSize: fileSize,
-                filePath: filePath,
-                summary: summaryInput && summaryInput.value.trim() ? summaryInput.value.trim() : 'Registered document.',
-                notes: ''
-            };
+                let fileStored = false;
+                if (file) {
+                    fileStored = await L().Storage.storeFile(articleId, file);
+                }
 
-            const state = window.Lexicon.State;
-            state.articles.unshift(newArticle);
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
-            this.render();
+                const ext = file ? U().fileExt(file.name) : '';
+                const newArticle = {
+                    id: articleId,
+                    title,
+                    authors: v('form-author'),
+                    year: Number.isFinite(yearRaw) ? yearRaw : null,
+                    publication: v('form-pub'),
+                    doi: v('form-doi'),
+                    status: VALID_STATUS.includes(statusRaw) ? statusRaw : 'inbox',
+                    collection: colRaw && colRaw !== 'none' ? colRaw : null,
+                    tags: ext ? [ext.toUpperCase()] : [],
+                    addedDate: U().localDateStr(),
+                    isFavorite: false,
+                    coverType: file ? this.getCoverType(file.name) : 'pdf',
+                    fileName: fileStored ? file.name : '',
+                    fileSize: fileStored ? U().formatBytes(file.size) : '',
+                    filePath: fileStored ? (file.webkitRelativePath || file.name) : '',
+                    summary: v('form-summary'),
+                    notes: ''
+                };
 
-            submitBtn.textContent = originalBtnText;
-            submitBtn.disabled = false;
-            window.Lexicon.UI.Modal.close('upload-modal');
-            window.Lexicon.UI.Toast.show('Document added to library catalog', 'success');
+                // Extra bibliographic data fetched by DOI in the form (volume/issue/pages/type)
+                const A = L().Academic;
+                const pending = A && A.consumePendingUploadMeta ? A.consumePendingUploadMeta() : null;
+                if (pending && (!pending.doi || !newArticle.doi || (A.normalizeDoi(newArticle.doi) === pending.doi))) {
+                    ['volume', 'issue', 'pages'].forEach(k => { if (pending[k]) newArticle[k] = pending[k]; });
+                    if (pending.coverType && !file) newArticle.coverType = pending.coverType;
+                }
 
-            // Reset form
-            document.getElementById('add-article-form').reset();
-            const fileNameDisplay = document.getElementById('selected-file-name');
-            if (fileNameDisplay) fileNameDisplay.textContent = '';
+                window.Lexicon.State.articles.unshift(newArticle);
+                await L().Storage.save();
+
+                if (fileStored && formExtraction && formExtraction.file === file && formExtraction.result.fullTextSnippet) {
+                    L().Storage.setExtractedText(articleId, formExtraction.result.fullTextSnippet);
+                }
+
+                L().Collections.render();
+                this.render();
+                L().UI.Modal.close('upload-modal');
+                toast(file && !fileStored
+                    ? tr('upload.addedWithoutFile', 'Documento registrado, mas o arquivo não pôde ser salvo.')
+                    : tr('upload.added', 'Documento adicionado ao acervo'), file && !fileStored ? 'warning' : 'success');
+                this.resetAddForm();
+            } catch (err) {
+                console.error('Add document failed:', err);
+                toast(tr('upload.addError', 'Erro ao adicionar documento: {error}', { error: err.message }), 'error');
+            } finally {
+                this._submitting = false;
+                if (submitBtn) {
+                    submitBtn.textContent = originalBtnText;
+                    submitBtn.disabled = false;
+                }
+            }
         },
 
         /* ------------------------------------------------------------------
@@ -1861,103 +1843,91 @@ window.Lexicon = window.Lexicon || {};
         stagedFiles: [],
 
         switchUploadTab(tab) {
-            const tabSingle = document.getElementById('upload-tab-single');
-            const tabMulti = document.getElementById('upload-tab-multi');
+            const isMulti = tab === 'multi';
+            const toggle = (id, hidden) => {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('hidden', hidden);
+            };
+            toggle('upload-tab-single', isMulti);
+            toggle('upload-tab-multi', !isMulti);
+            toggle('submit-article-btn', isMulti);
+            toggle('submit-multi-import-btn', !isMulti);
             const btnSingle = document.getElementById('tab-btn-single');
             const btnMulti = document.getElementById('tab-btn-multi');
-            const submitSingle = document.getElementById('submit-article-btn');
-            const submitMulti = document.getElementById('submit-multi-import-btn');
-
-            if (tab === 'multi') {
-                if (tabSingle) tabSingle.classList.add('hidden');
-                if (tabMulti) tabMulti.classList.remove('hidden');
-                if (btnSingle) btnSingle.classList.remove('active');
-                if (btnMulti) btnMulti.classList.add('active');
-                if (submitSingle) submitSingle.classList.add('hidden');
-                if (submitMulti) submitMulti.classList.remove('hidden');
-            } else {
-                if (tabMulti) tabMulti.classList.add('hidden');
-                if (tabSingle) tabSingle.classList.remove('hidden');
-                if (btnMulti) btnMulti.classList.remove('active');
-                if (btnSingle) btnSingle.classList.add('active');
-                if (submitMulti) submitMulti.classList.add('hidden');
-                if (submitSingle) submitSingle.classList.remove('hidden');
+            if (btnSingle) {
+                btnSingle.classList.toggle('active', !isMulti);
+                btnSingle.setAttribute('aria-selected', String(!isMulti));
+            }
+            if (btnMulti) {
+                btnMulti.classList.toggle('active', isMulti);
+                btnMulti.setAttribute('aria-selected', String(isMulti));
             }
         },
 
         isSupportedDocument(filename) {
-            const supportedExts = ['.pdf', '.epub', '.doc', '.docx', '.txt', '.md', '.mobi', '.djvu'];
-            const lower = filename.toLowerCase();
-            return supportedExts.some(ext => lower.endsWith(ext));
+            return SUPPORTED_EXTS.includes(U().fileExt(filename));
         },
 
         cleanTitle(filename) {
-            const base = filename.replace(/\.[^/.]+$/, "");
+            const base = String(filename || '').replace(/\.[^/.]+$/, "");
             const cleaned = base.replace(/[-_+]/g, " ").replace(/\s+/g, " ").trim();
             return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
         },
 
+        /** Year found in the file name, or null (never invents the current year) */
         extractYear(filename) {
-            const match = filename.match(/\b(19\d{2}|20\d{2})\b/);
-            return match ? parseInt(match[1]) : new Date().getFullYear();
+            const match = String(filename || '').match(/(?:^|[^0-9])(19\d{2}|20\d{2})(?![0-9])/);
+            if (!match) return null;
+            const y = parseInt(match[1], 10);
+            return y <= new Date().getFullYear() + 1 ? y : null;
         },
 
         getCoverType(filename) {
-            const lower = filename.toLowerCase();
-            if (lower.endsWith('.epub') || lower.endsWith('.mobi')) return 'book';
-            if (lower.endsWith('.doc') || lower.endsWith('.docx')) return 'doc';
+            const ext = U().fileExt(filename);
+            if (ext === 'epub' || ext === 'mobi') return 'book';
+            if (ext === 'doc' || ext === 'docx') return 'doc';
             return 'pdf';
         },
 
         formatBytes(bytes) {
-            if (!bytes || bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+            return U().formatBytes(bytes);
         },
 
-        /**
-         * Add files to staging list, checking for supported extensions and extracting folder info
-         */
         addFilesToStaging(items) {
             let addedCount = 0;
-            items.forEach(item => {
+            let skipped = 0;
+            (items || []).forEach(item => {
                 const file = item.file || item;
                 if (!file || !file.name) return;
-
-                // Ignore hidden or OS files
                 if (file.name.startsWith('.') || file.name.startsWith('~') || file.name === 'Thumbs.db') return;
-                if (!this.isSupportedDocument(file.name)) return;
+                if (!this.isSupportedDocument(file.name)) {
+                    skipped++;
+                    return;
+                }
 
-                // Check duplicate in staged
-                const exists = this.stagedFiles.some(s => s.file.name === file.name && s.file.size === file.size && s.path === (item.path || file.name));
+                const relativePath = item.path || file.webkitRelativePath || file.name;
+                const exists = this.stagedFiles.some(s => s.file.name === file.name && s.file.size === file.size && s.path === relativePath);
                 if (exists) return;
 
-                let relativePath = item.path || file.webkitRelativePath || file.name;
                 let folder = item.folder || '';
-
                 if (!folder && relativePath && relativePath.includes('/')) {
                     const parts = relativePath.split('/').filter(Boolean);
-                    if (parts.length > 1) {
-                        folder = parts[parts.length - 2];
-                    }
+                    if (parts.length > 1) folder = parts[parts.length - 2];
                 }
 
                 this.stagedFiles.push({
-                    file: file,
+                    file,
                     name: file.name,
                     size: file.size,
                     path: relativePath,
-                    folder: folder ? folder.trim() : ''
+                    folder: String(folder || '').trim().slice(0, 120)
                 });
                 addedCount++;
             });
 
             this.renderStagedFiles();
-            if (addedCount > 0) {
-                this.switchUploadTab('multi');
-            }
+            if (addedCount > 0) this.switchUploadTab('multi');
+            if (skipped > 0) toast(tr('upload.skippedUnsupported', '{count} arquivo(s) ignorado(s): formato não suportado', { count: skipped }), 'info');
         },
 
         renderStagedFiles() {
@@ -1965,15 +1935,15 @@ window.Lexicon = window.Lexicon || {};
             const listEl = document.getElementById('staged-files-list');
             const countText = document.getElementById('staged-count-text');
             const submitBtn = document.getElementById('submit-multi-import-btn');
-
             if (!container || !listEl || !countText) return;
 
             const n = this.stagedFiles.length;
             if (n === 0) {
                 container.classList.add('hidden');
+                listEl.innerHTML = '';
                 if (submitBtn) {
                     submitBtn.disabled = true;
-                    submitBtn.textContent = 'Import Documents';
+                    submitBtn.textContent = tr('upload.importDocuments', 'Importar documentos');
                 }
                 return;
             }
@@ -1981,40 +1951,36 @@ window.Lexicon = window.Lexicon || {};
             container.classList.remove('hidden');
             if (submitBtn) {
                 submitBtn.disabled = false;
-                submitBtn.textContent = `Import ${n} Document${n > 1 ? 's' : ''}`;
+                submitBtn.textContent = tr('upload.importN', 'Importar {count} documento(s)', { count: n });
             }
 
-            // Calculate folders breakdown
             const folders = {};
+            const noFolder = tr('upload.noFolder', 'Sem pasta');
             this.stagedFiles.forEach(f => {
-                const fol = f.folder || 'Uncategorized';
+                const fol = f.folder || noFolder;
                 folders[fol] = (folders[fol] || 0) + 1;
             });
-
             const folderNames = Object.keys(folders);
             const folderBreakdown = folderNames.map(f => `${f} (${folders[f]})`).join(', ');
-            countText.innerHTML = `<strong>${n} document${n > 1 ? 's' : ''} staged</strong> <span class="text-earth/70 font-normal">in ${folderNames.length} folder${folderNames.length > 1 ? 's' : ''}: ${folderBreakdown}</span>`;
+            countText.innerHTML = `<strong>${esc(tr('upload.stagedCount', '{count} documento(s) preparado(s)', { count: n }))}</strong> <span class="text-earth/70 font-normal">${esc(tr('upload.inFolders', 'em {count} pasta(s)', { count: folderNames.length }))}: ${esc(folderBreakdown)}</span>`;
 
+            const removeLabel = esc(tr('upload.removeFile', 'Remover arquivo'));
             listEl.innerHTML = this.stagedFiles.map((staged, idx) => {
-                const coverType = this.getCoverType(staged.name);
-                const icon = coverType === 'book' ? 'ph-book-bookmark text-terracotta' :
-                             coverType === 'doc' ? 'ph-file-doc text-jungle' :
-                             'ph-file-pdf text-terracotta';
-
+                const icon = fileTypeIcon({ fileName: staged.name, coverType: this.getCoverType(staged.name) });
                 return `
                     <div class="staged-file-row flex items-center justify-between px-3 py-2 gap-3">
                         <div class="flex items-center gap-2.5 min-w-0 flex-1">
-                            <i class="ph ${icon} text-base shrink-0"></i>
+                            <i class="ph ${icon} text-base shrink-0" aria-hidden="true"></i>
                             <div class="min-w-0">
-                                <p class="text-xs font-semibold text-soil truncate">${window.Lexicon.Utils.escapeHTML(staged.name)}</p>
+                                <p class="text-xs font-semibold text-soil truncate">${esc(staged.name)}</p>
                                 <div class="flex items-center gap-2 text-[10px] text-earth/70 font-mono">
-                                    ${staged.folder ? `<span class="bg-jungle/10 text-canopy px-1.5 py-0.5 rounded font-sans font-semibold flex items-center gap-1"><i class="ph ph-folder text-xs"></i> ${window.Lexicon.Utils.escapeHTML(staged.folder)}</span>` : '<span class="italic font-sans">No folder</span>'}
-                                    <span>${this.formatBytes(staged.size)}</span>
+                                    ${staged.folder ? `<span class="bg-jungle/10 text-canopy px-1.5 py-0.5 rounded font-sans font-semibold flex items-center gap-1"><i class="ph ph-folder text-xs" aria-hidden="true"></i> ${esc(staged.folder)}</span>` : `<span class="italic font-sans">${esc(noFolder)}</span>`}
+                                    <span>${esc(U().formatBytes(staged.size))}</span>
                                 </div>
                             </div>
                         </div>
-                        <button type="button" data-action="remove-staged-file" data-index="${idx}" class="text-earth hover:text-terracotta p-1 rounded transition-colors cursor-pointer" title="Remove file">
-                            <i class="ph ph-x"></i>
+                        <button type="button" data-action="remove-staged-file" data-index="${idx}" class="text-earth hover:text-terracotta p-1 rounded transition-colors cursor-pointer" title="${removeLabel}" aria-label="${removeLabel}">
+                            <i class="ph ph-x" aria-hidden="true"></i>
                         </button>
                     </div>
                 `;
@@ -2029,14 +1995,16 @@ window.Lexicon = window.Lexicon || {};
         clearStagedFiles() {
             this.stagedFiles = [];
             this.renderStagedFiles();
-            const multiInput = document.getElementById('import-multi-files-input');
-            const folderInput = document.getElementById('import-folder-input');
-            if (multiInput) multiInput.value = '';
-            if (folderInput) folderInput.value = '';
+            ['import-multi-files-input', 'import-folder-input'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
         },
 
         /**
-         * Recursively scan DataTransferItemList for files and folder hierarchies
+         * Recursively scan DataTransferItemList for files and folder hierarchies.
+         * NOTE: webkitGetAsEntry() must be called synchronously inside the drop event,
+         * so entries are collected before the first await.
          */
         async scanDataTransferItems(items) {
             const results = [];
@@ -2044,10 +2012,11 @@ window.Lexicon = window.Lexicon || {};
 
             for (let i = 0; i < items.length; i++) {
                 const item = items[i];
-                if (item.webkitGetAsEntry) {
-                    const entry = item.webkitGetAsEntry();
-                    if (entry) queue.push(entry);
-                } else if (item.kind === 'file') {
+                if (item.kind !== 'file') continue;
+                const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+                if (entry) {
+                    queue.push(entry);
+                } else {
                     const f = item.getAsFile();
                     if (f) results.push({ file: f, path: f.name, folder: '' });
                 }
@@ -2076,9 +2045,7 @@ window.Lexicon = window.Lexicon || {};
                         };
                         readAll();
                     });
-                    for (const sub of entries) {
-                        queue.push(sub);
-                    }
+                    entries.forEach(sub => queue.push(sub));
                 }
             }
 
@@ -2089,7 +2056,8 @@ window.Lexicon = window.Lexicon || {};
          * Execute multi-file and folder import
          */
         async executeMultiImport() {
-            if (this.stagedFiles.length === 0) return;
+            if (this.stagedFiles.length === 0 || this._importing) return;
+            this._importing = true;
 
             const submitBtn = document.getElementById('submit-multi-import-btn');
             const progressContainer = document.getElementById('import-progress-container');
@@ -2099,100 +2067,109 @@ window.Lexicon = window.Lexicon || {};
 
             const autoCollections = document.getElementById('import-opt-folder-collections')?.checked ?? true;
             const autoTags = document.getElementById('import-opt-folder-tags')?.checked ?? true;
-            const fallbackCollection = document.getElementById('import-opt-default-collection')?.value || null;
-            const targetStatus = document.getElementById('import-opt-status')?.value || 'inbox';
+            const fallbackRaw = document.getElementById('import-opt-default-collection')?.value || '';
+            const fallbackCollection = fallbackRaw && fallbackRaw !== 'none' ? fallbackRaw : null;
+            const statusRaw = document.getElementById('import-opt-status')?.value || 'inbox';
+            const targetStatus = VALID_STATUS.includes(statusRaw) ? statusRaw : 'inbox';
 
             if (submitBtn) {
                 submitBtn.disabled = true;
-                submitBtn.textContent = 'Importing...';
+                submitBtn.textContent = tr('upload.importing', 'Importando...');
             }
-
             if (progressContainer) progressContainer.classList.remove('hidden');
 
-            const total = this.stagedFiles.length;
+            const staged = this.stagedFiles.slice();
+            const total = staged.length;
             const createdCollections = new Set();
             const state = window.Lexicon.State;
+            let imported = 0;
+            let failed = 0;
 
-            for (let i = 0; i < total; i++) {
-                const staged = this.stagedFiles[i];
-                const file = staged.file;
-                const articleId = Date.now() + i;
+            try {
+                for (let i = 0; i < total; i++) {
+                    const item = staged[i];
+                    const file = item.file;
+                    const articleId = U().newArticleId();
 
-                // Determine collection
-                let collectionName = fallbackCollection;
-                if (staged.folder && autoCollections) {
-                    collectionName = staged.folder;
-                    window.Lexicon.Collections.getOrCreate(collectionName);
-                    createdCollections.add(collectionName);
-                } else if (fallbackCollection) {
-                    collectionName = fallbackCollection;
+                    let collectionName = fallbackCollection;
+                    if (item.folder && autoCollections) {
+                        const col = L().Collections.getOrCreate(item.folder, { silent: true });
+                        collectionName = col ? col.name : fallbackCollection;
+                        if (col) createdCollections.add(col.name);
+                    }
+
+                    const tags = [];
+                    if (item.folder && autoTags) {
+                        const folderTag = item.folder.normalize('NFC').replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+                        if (folderTag) tags.push(folderTag);
+                    }
+                    const ext = U().fileExt(file.name).toUpperCase();
+                    if (ext) tags.push(ext);
+
+                    if (progressLabel) progressLabel.textContent = tr('upload.importProgress', 'Importando ({current}/{total}): {name}', { current: i + 1, total, name: file.name });
+
+                    const ok = await L().Storage.storeFile(articleId, file);
+                    if (!ok) {
+                        failed++;
+                        // Storage is most likely full: stop instead of failing on every file
+                        if (failed >= 3 && imported === 0) break;
+                        continue;
+                    }
+
+                    state.articles.unshift({
+                        id: articleId,
+                        title: this.cleanTitle(file.name),
+                        authors: '',
+                        year: this.extractYear(file.name),
+                        publication: '',
+                        doi: '',
+                        status: targetStatus,
+                        collection: collectionName,
+                        tags,
+                        addedDate: U().localDateStr(),
+                        isFavorite: false,
+                        coverType: this.getCoverType(file.name),
+                        fileName: file.name,
+                        fileSize: U().formatBytes(file.size),
+                        filePath: item.path || file.name,
+                        summary: '',
+                        notes: ''
+                    });
+                    imported++;
+
+                    // Persist periodically so a closed tab doesn't orphan stored files
+                    if (imported % 20 === 0) await L().Storage.save();
+
+                    const pct = Math.round(((i + 1) / total) * 100);
+                    if (progressBar) progressBar.style.width = `${pct}%`;
+                    if (progressPercent) progressPercent.textContent = `${pct}%`;
                 }
+            } catch (err) {
+                console.error('Multi import failed:', err);
+                toast(tr('upload.importError', 'Erro na importação: {error}', { error: err.message }), 'error');
+            } finally {
+                await L().Storage.save();
+                L().Collections.render();
+                L().Collections.populateSelects();
+                this.render();
 
-                // Determine tags
-                const tags = [];
-                if (staged.folder && autoTags) {
-                    tags.push(staged.folder.replace(/[^a-zA-Z0-9_-]/g, '-'));
+                this.clearStagedFiles();
+                if (progressContainer) progressContainer.classList.add('hidden');
+                if (progressBar) progressBar.style.width = '0%';
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = tr('upload.importDocuments', 'Importar documentos');
                 }
-                const ext = file.name.split('.').pop().toUpperCase();
-                if (ext) tags.push(ext);
-
-                // Store in IndexedDB
-                await window.Lexicon.Storage.storeFile(articleId, file);
-
-                // Build article metadata
-                const title = this.cleanTitle(file.name);
-                const year = this.extractYear(file.name);
-                const coverType = this.getCoverType(file.name);
-
-                const newArticle = {
-                    id: articleId,
-                    title: title,
-                    authors: 'Unknown',
-                    year: year,
-                    publication: '',
-                    doi: '',
-                    status: targetStatus,
-                    collection: collectionName,
-                    tags: tags,
-                    addedDate: new Date().toISOString().split('T')[0],
-                    isFavorite: false,
-                    coverType: coverType,
-                    fileName: file.name,
-                    fileSize: this.formatBytes(file.size),
-                    filePath: staged.path || file.name,
-                    summary: staged.folder 
-                        ? `Imported from folder "${staged.folder}".` 
-                        : 'Imported document.',
-                    notes: ''
-                };
-
-                state.articles.unshift(newArticle);
-
-                // Update progress
-                const pct = Math.round(((i + 1) / total) * 100);
-                if (progressBar) progressBar.style.width = `${pct}%`;
-                if (progressPercent) progressPercent.textContent = `${pct}%`;
-                if (progressLabel) progressLabel.textContent = `Importing (${i + 1}/${total}): ${file.name}`;
+                this._importing = false;
             }
 
-            window.Lexicon.Storage.save();
-            window.Lexicon.Collections.render();
-            window.Lexicon.Collections.populateSelects();
-            this.render();
-
-            this.clearStagedFiles();
-            if (progressContainer) progressContainer.classList.add('hidden');
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Import Documents';
+            if (imported > 0) L().UI.Modal.close('upload-modal');
+            const colMsg = createdCollections.size > 0 ? ` • ${tr('upload.intoCollections', 'em {count} coleção(ões)', { count: createdCollections.size })}` : '';
+            if (failed > 0) {
+                toast(tr('upload.importPartial', '{ok} de {total} documentos importados; {failed} falharam (armazenamento cheio?).', { ok: imported, total, failed }), 'warning');
+            } else {
+                toast(tr('upload.importDone', '{count} documentos importados com sucesso!', { count: imported }) + colMsg, 'success');
             }
-
-            window.Lexicon.UI.Modal.close('upload-modal');
-
-            const colMsg = createdCollections.size > 0 
-                ? ` into ${createdCollections.size} collection${createdCollections.size > 1 ? 's' : ''}` 
-                : '';
-            window.Lexicon.UI.Toast.show(`Imported ${total} documents${colMsg} successfully!`, 'success');
         }
     };
 })();

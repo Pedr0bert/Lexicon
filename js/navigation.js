@@ -6,17 +6,23 @@
 window.Lexicon = window.Lexicon || {};
 
 (function() {
+    const MAX_HISTORY = 100;
     const historyStack = [];
     const forwardStack = [];
     let isNavigating = false;
 
     window.Lexicon.Navigation = {
         init() {
+            if (this._initialized) return;
+            this._initialized = true;
             // Keyboard shortcuts: Alt + Left Arrow for Back, Alt + Right Arrow for Forward
             document.addEventListener('keydown', (e) => {
-                const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
-                const isTyping = activeTag === 'input' || activeTag === 'textarea';
+                const el = document.activeElement;
+                const activeTag = el ? el.tagName.toLowerCase() : '';
+                const isTyping = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select' || (el && el.isContentEditable);
                 if (isTyping) return;
+                // Don't navigate the library behind an open dialog
+                if (window.Lexicon.UI && window.Lexicon.UI.Modal && window.Lexicon.UI.Modal.topId()) return;
 
                 if (e.altKey && e.key === 'ArrowLeft') {
                     e.preventDefault();
@@ -55,6 +61,7 @@ window.Lexicon = window.Lexicon || {};
             const last = historyStack[historyStack.length - 1];
             if (!this.isEqual(current, last)) {
                 historyStack.push(current);
+                if (historyStack.length > MAX_HISTORY) historyStack.shift();
                 forwardStack.length = 0; // Clear forward stack on new navigation
                 this.updateButtons();
             }

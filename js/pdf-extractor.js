@@ -1,22 +1,22 @@
 /* ==========================================================================
    Lexicon - Real PDF Text & Metadata Extractor
-   Uses PDF.js in pure local mode (zero-build, local-first)
+   Uses PDF.js (v4, vendored) in pure local mode (zero-build, local-first)
    Extracts Title, Authors, Year, Abstract and Raw Page Text
    ========================================================================== */
 
 window.Lexicon = window.Lexicon || {};
 
 (function() {
-    // Configure PDF.js worker to use local vendored worker
+    const MAX_PDF_BYTES = 300 * 1024 * 1024; // refuse to parse absurdly large files in the UI thread
+    const failedIds = new Set();             // avoid re-parsing PDFs that already failed this session
+    const inFlight = new Map();              // articleId -> Promise (dedupe concurrent extractions)
+
     function initPDFJS() {
-        if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/vendor/pdf.worker.min.js';
+        if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'js/vendor/pdf.worker.min.mjs';
         }
     }
 
-    /**
-     * Clean and normalize raw extracted text
-     */
     function normalizeText(str) {
         if (!str) return '';
         return str
@@ -32,42 +32,67 @@ window.Lexicon = window.Lexicon || {};
      */
     function extractAbstractFromText(text) {
         if (!text) return '';
-        
-        // Pattern 1: Explicit "Abstract" or "Resumo" section
         const match = text.match(/(?:^|\n)\s*(?:abstract|resumo|executive summary)\s*[:.\-—]?\s*\n?([\s\S]{120,3500}?)(?:\n\s*(?:1[\s.]|intro|key\s*words|palavras-chave|index terms|contents|background|methods))/i);
         if (match && match[1]) {
             return match[1].replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
         }
-
-        // Pattern 2: Simpler match for abstract paragraph
         const simpleMatch = text.match(/(?:abstract|resumo)\s*[:.\-—]\s*([^\n]{80,1200})/i);
         if (simpleMatch && simpleMatch[1]) {
             return simpleMatch[1].trim();
         }
-
         return '';
     }
 
-    /**
-     * Clean PDF metadata strings that may have byte order marks or encoding artifacts
-     */
     function cleanMetadataString(val) {
         if (!val || typeof val !== 'string') return '';
-        let cleaned = val.replace(/^\uFEFF/, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
-        // Discard generic file path strings or untranslated placeholders
-        if (cleaned.startsWith('Untitled') || cleaned.startsWith('Microsoft Word') || cleaned.endsWith('.pdf')) {
+        const cleaned = val.replace(/^\uFEFF/, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+        if (/^(untitled|microsoft word|document\d*$|title$)/i.test(cleaned) || /\.(pdf|docx?|tex|dvi)$/i.test(cleaned) || cleaned.length < 4) {
             return '';
         }
         return cleaned;
     }
 
-    /**
-     * Parse year from PDF CreationDate (e.g. "D:20240115123000")
-     */
     function extractYearFromDate(dateStr) {
         if (!dateStr) return null;
-        const match = String(dateStr).match(/\b(19\d\d|20\d\d)\b/);
+        const match = String(dateStr).match(/(19\d\d|20\d\d)/);
         return match ? parseInt(match[1], 10) : null;
+    }
+
+    /**
+     * Rebuild reading order for one page. Items are bucketed by column (based on x
+     * position relative to the page middle) and then by line (y), which keeps
+     * two-column papers from interleaving their columns.
+     */
+    function pageItemsToText(items, pageWidth) {
+        const textItems = items.filter(it => it && typeof it.str === 'string' && it.str.trim() && it.transform);
+        if (!textItems.length) return '';
+
+        const mid = pageWidth / 2;
+        // Detect two-column layout: enough items start right of the middle and few cross it
+        const leftStarts = textItems.filter(it => it.transform[4] < mid - 10).length;
+        const rightStarts = textItems.filter(it => it.transform[4] >= mid).length;
+        const crossing = textItems.filter(it => it.transform[4] < mid - 10 && (it.transform[4] + (it.width || 0)) > mid + 20).length;
+        const twoColumns = rightStarts > textItems.length * 0.25 && leftStarts > textItems.length * 0.25 && crossing < textItems.length * 0.15;
+
+        const columns = twoColumns ? [[], []] : [[]];
+        textItems.forEach(it => {
+            const col = twoColumns && it.transform[4] >= mid ? 1 : 0;
+            columns[col].push(it);
+        });
+
+        const colTexts = columns.map(colItems => {
+            const lineMap = new Map();
+            colItems.forEach(it => {
+                const y = Math.round(it.transform[5] / 2) * 2; // tolerate tiny baseline jitter
+                if (!lineMap.has(y)) lineMap.set(y, []);
+                lineMap.get(y).push(it);
+            });
+            return Array.from(lineMap.keys())
+                .sort((a, b) => b - a)
+                .map(y => lineMap.get(y).sort((a, b) => a.transform[4] - b.transform[4]).map(it => it.str).join(' '))
+                .join('\n');
+        });
+        return colTexts.join('\n');
     }
 
     window.Lexicon.PDFExtractor = {
@@ -76,34 +101,40 @@ window.Lexicon = window.Lexicon || {};
         },
 
         isAvailable() {
-            return typeof window.pdfjsLib !== 'undefined';
+            initPDFJS();
+            return typeof window.pdfjsLib !== 'undefined' && typeof window.pdfjsLib.getDocument === 'function';
         },
 
         /**
          * Extract text and metadata from a File or Blob
          * @param {File|Blob} blob
          * @param {number} [maxPages=3]
-         * @returns {Promise<{title: string, authors: string, year: number|null, abstract: string, fullTextSnippet: string, pageCount: number}>}
+         * @returns {Promise<{title: string, authors: string, year: number|null, abstract: string, fullTextSnippet: string, pageCount: number}|null>}
          */
         async extractFromBlob(blob, maxPages = 3) {
-            initPDFJS();
             if (!this.isAvailable()) {
-                console.warn('[PDFExtractor] PDF.js not loaded yet.');
+                console.warn('[PDFExtractor] PDF.js not loaded (serve the app over http:// to enable it).');
                 return null;
             }
+            if (!blob || blob.size > MAX_PDF_BYTES) return null;
 
+            let pdfDoc = null;
+            let loadingTask = null;
             try {
-                const arrayBuffer = await blob.arrayBuffer();
-                const loadingTask = window.pdfjsLib.getDocument({
-                    data: arrayBuffer,
-                    disableRange: true,
-                    disableStream: true
+                const data = new Uint8Array(await blob.arrayBuffer());
+                loadingTask = window.pdfjsLib.getDocument({
+                    data,
+                    // Security hardening (CVE-2024-4367 class of bugs): never compile font code with eval
+                    isEvalSupported: false,
+                    enableXfa: false,
+                    disableFontFace: true,
+                    useSystemFonts: false,
+                    stopAtErrors: false
                 });
 
-                const pdfDoc = await loadingTask.promise;
+                pdfDoc = await loadingTask.promise;
                 const pageCount = pdfDoc.numPages || 1;
 
-                // 1. Extract embedded PDF metadata
                 let metaTitle = '';
                 let metaAuthors = '';
                 let metaYear = null;
@@ -120,49 +151,30 @@ window.Lexicon = window.Lexicon || {};
                     console.warn('[PDFExtractor] Could not extract PDF metadata:', metaErr);
                 }
 
-                // 2. Extract text from the first pages (where Title, Authors, Abstract live)
                 const pagesToRead = Math.min(pageCount, maxPages);
                 const pageTexts = [];
 
                 for (let i = 1; i <= pagesToRead; i++) {
                     const page = await pdfDoc.getPage(i);
+                    const viewport = page.getViewport({ scale: 1 });
                     const textContent = await page.getTextContent();
-                    
-                    // Group text items by vertical position to preserve line structure
-                    const items = textContent.items || [];
-                    const lineMap = new Map();
-
-                    for (const item of items) {
-                        if (!item.str) continue;
-                        const y = Math.round(item.transform[5]);
-                        if (!lineMap.has(y)) {
-                            lineMap.set(y, []);
-                        }
-                        lineMap.get(y).push(item.str);
-                    }
-
-                    // Sort descending by y (top of page to bottom)
-                    const sortedY = Array.from(lineMap.keys()).sort((a, b) => b - a);
-                    const pageLines = sortedY.map(y => lineMap.get(y).join(' '));
-                    pageTexts.push(pageLines.join('\n'));
+                    pageTexts.push(pageItemsToText(textContent.items || [], viewport.width));
+                    page.cleanup();
                 }
 
                 const fullTextSnippet = normalizeText(pageTexts.join('\n\n--- Page Break ---\n\n'));
                 const abstract = extractAbstractFromText(fullTextSnippet);
 
-                // If no metadata title was found, heuristically inspect first lines of page 1
+                // If no metadata title was found, heuristically inspect the first lines of page 1
                 if (!metaTitle && pageTexts[0]) {
                     const firstLines = pageTexts[0]
                         .split('\n')
                         .map(l => l.trim())
-                        .filter(l => l.length > 5 && !/^(arxiv|doi|issn|isbn|vol|no|page|http|https)/i.test(l));
-                    
-                    if (firstLines.length > 0) {
-                        const candidate = firstLines[0];
-                        if (candidate.length >= 10 && candidate.length <= 250) {
-                            metaTitle = candidate;
-                        }
-                    }
+                        .filter(l => l.length > 5 &&
+                            !/^(arxiv|doi|issn|isbn|vol\b|volume|no\.|page|http|www\.|received|accepted|published|copyright|©|journal|proceedings|preprint)/i.test(l) &&
+                            !/^\d+$/.test(l));
+                    const candidate = firstLines.find(l => l.length >= 10 && l.length <= 250 && /[a-zA-Zà-ÿ]/.test(l));
+                    if (candidate) metaTitle = candidate;
                 }
 
                 return {
@@ -176,37 +188,60 @@ window.Lexicon = window.Lexicon || {};
             } catch (err) {
                 console.error('[PDFExtractor] Extraction failed:', err);
                 return null;
+            } finally {
+                // Release worker memory for this document
+                try {
+                    if (pdfDoc) await pdfDoc.destroy();
+                    else if (loadingTask) await loadingTask.destroy();
+                } catch (e) { /* ignore */ }
             }
         },
 
         /**
-         * Extract text for an existing article by looking up its stored blob in IndexedDB
+         * Extract text for an existing article from its stored blob (cached in IndexedDB).
          * @param {Object} article
+         * @param {{force?: boolean}} [opts]
          * @returns {Promise<string|null>}
          */
-        async extractTextForArticle(article) {
+        async extractTextForArticle(article, opts = {}) {
             if (!article || !article.id) return null;
-            if (article.extractedText) return article.extractedText;
+            if (article.extractedText && !opts.force) return article.extractedText;
+            if (failedIds.has(article.id) && !opts.force) return null;
+            if (inFlight.has(article.id)) return inFlight.get(article.id);
 
-            const storedFile = await window.Lexicon.Storage.getFile(article.id);
-            if (!storedFile) return null;
+            const job = (async () => {
+                const storedFile = await window.Lexicon.Storage.getFile(article.id);
+                if (!storedFile) return null;
 
-            // Only process PDFs
-            const isPdf = storedFile.type === 'application/pdf' || 
-                          (article.fileName && article.fileName.toLowerCase().endsWith('.pdf')) ||
-                          article.coverType === 'pdf';
-            if (!isPdf) return null;
+                const name = (storedFile.name || article.fileName || '').toLowerCase();
+                const isPdf = storedFile.type === 'application/pdf' || name.endsWith('.pdf');
+                if (!isPdf) return null;
 
-            const result = await this.extractFromBlob(storedFile, 3);
-            if (result && result.fullTextSnippet) {
-                article.extractedText = result.fullTextSnippet;
-                if (!article.summary && result.abstract) {
-                    article.summary = result.abstract;
+                const result = await this.extractFromBlob(storedFile, 3);
+                if (result && result.fullTextSnippet) {
+                    await window.Lexicon.Storage.setExtractedText(article.id, result.fullTextSnippet);
+                    if (!article.summary && result.abstract) {
+                        article.summary = result.abstract;
+                        window.Lexicon.Storage.save();
+                    }
+                    return result.fullTextSnippet;
                 }
-                window.Lexicon.Storage.save();
-                return article.extractedText;
+                failedIds.add(article.id);
+                return null;
+            })();
+
+            inFlight.set(article.id, job);
+            try {
+                return await job;
+            } finally {
+                inFlight.delete(article.id);
             }
-            return null;
+        },
+
+        /** Forget cached text (e.g. after a different file was linked) */
+        async invalidate(articleId) {
+            failedIds.delete(Number(articleId));
+            await window.Lexicon.Storage.setExtractedText(articleId, null);
         }
     };
 })();

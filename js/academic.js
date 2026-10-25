@@ -8,7 +8,354 @@ window.Lexicon = window.Lexicon || {};
 (function() {
     'use strict';
 
+    /* ----------------------------------------------------------------------
+       Module-level helpers
+       ---------------------------------------------------------------------- */
+
+    /**
+     * i18n lookup with a safe local fallback (I18n.t returns the key itself when missing)
+     */
+    const tr = (key, fallback, params) => {
+        const I = window.Lexicon.I18n;
+        if (I && typeof I.t === 'function') {
+            const v = I.t(key, params);
+            if (typeof v === 'string' && v !== key) return v;
+        }
+        return String(fallback).replace(/\{(\w+)\}/g, (_, k) => params && params[k] !== undefined ? params[k] : `{${k}}`);
+    };
+
+    const toast = (msg, type) => {
+        const UI = window.Lexicon.UI;
+        if (UI && UI.Toast && typeof UI.Toast.show === 'function') UI.Toast.show(msg, type);
+    };
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    /** Local calendar date as YYYY-MM-DD (never UTC-shifted) */
+    const localDateStr = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+    /** Removes combining diacritics (NFD) */
+    const stripDiacritics = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    /** Collapses CR/LF and repeated whitespace into single spaces */
+    const oneLine = (s) => String(s === null || s === undefined ? '' : s).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+    /** Appends a period unless the text already ends with terminal punctuation */
+    const endPunct = (s) => {
+        const str = String(s || '').trim();
+        if (!str) return '';
+        return /[.?!]$/.test(str) ? str : str + '.';
+    };
+
+    /** Cleans a title for citation use (trims and removes trailing periods) */
+    const cleanTitle = (s) => oneLine(s).replace(/\.+$/, '');
+
+    // --- HTML entity decoding (single pass, no double-decoding) ---
+    const NAMED_ENTITIES = {
+        amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+        ndash: '–', mdash: '—', hellip: '…', lsquo: '‘', rsquo: '’',
+        ldquo: '“', rdquo: '”', laquo: '«', raquo: '»', copy: '©', reg: '®',
+        trade: '™', deg: '°', plusmn: '±', times: '×', divide: '÷', middot: '·',
+        bull: '•', prime: '′', Prime: '″', minus: '−', le: '≤', ge: '≥', ne: '≠',
+        alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', mu: 'μ', pi: 'π', sigma: 'σ',
+        shy: '', zwj: '', zwnj: '', szlig: 'ß', aelig: 'æ', AElig: 'Æ', oslash: 'ø', Oslash: 'Ø', ordf: 'ª', ordm: 'º'
+    };
+    // Accented Latin letters: &aacute; &atilde; &ccedil; &ouml; ... (composed via NFC)
+    (function addAccentEntities() {
+        const marks = { acute: '\u0301', grave: '\u0300', circ: '\u0302', tilde: '\u0303', uml: '\u0308', ring: '\u030A', cedil: '\u0327' };
+        'aeiouycnAEIOUYCN'.split('').forEach(letter => {
+            Object.keys(marks).forEach(name => {
+                const composed = (letter + marks[name]).normalize('NFC');
+                if (composed.length === 1) NAMED_ENTITIES[letter + name] = composed;
+            });
+        });
+    })();
+
+    function decodeNamedEntityFallback(entity) {
+        try {
+            if (typeof DOMParser !== 'undefined') {
+                // Only the isolated entity is parsed (no markup), so this is inert.
+                const doc = new DOMParser().parseFromString(`<!doctype html><body>${entity}`, 'text/html');
+                const out = doc && doc.body ? doc.body.textContent : null;
+                if (out && out !== entity) return out;
+            }
+        } catch (e) { /* ignore */ }
+        return entity;
+    }
+
+    function decodeEntities(str) {
+        return String(str).replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g, (m, body) => {
+            if (body[0] === '#') {
+                const code = (body[1] === 'x' || body[1] === 'X') ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+                if (!isNaN(code) && code > 0 && code <= 0x10FFFF) {
+                    try { return String.fromCodePoint(code); } catch (e) { return m; }
+                }
+                return m;
+            }
+            if (Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, body)) return NAMED_ENTITIES[body];
+            return decodeNamedEntityFallback(m);
+        });
+    }
+
+    // --- DOI helpers ---
+
+    /** Strips doi.org / dx.doi.org URL prefixes and a "doi:" label */
+    function normalizeDoi(doi) {
+        if (!doi) return '';
+        return String(doi).trim()
+            .replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
+            .replace(/^(?:dx\.)?doi\.org\//i, '')
+            .replace(/^doi:\s*/i, '')
+            .trim();
+    }
+
+    /** Removes trailing punctuation picked up from prose; ')' only when unbalanced */
+    function stripTrailingDoiPunct(doi) {
+        let s = String(doi || '');
+        let changed = true;
+        while (changed && s) {
+            changed = false;
+            if (/[.,;:]$/.test(s)) {
+                s = s.slice(0, -1);
+                changed = true;
+            } else if (s.endsWith(')')) {
+                const opens = (s.match(/\(/g) || []).length;
+                const closes = (s.match(/\)/g) || []).length;
+                if (closes > opens) {
+                    s = s.slice(0, -1);
+                    changed = true;
+                }
+            }
+        }
+        return s;
+    }
+
+    function isArxivDoi(doi) {
+        return /^(?:arxiv:|10\.48550\/arxiv\.)/i.test(normalizeDoi(doi));
+    }
+
+    function arxivIdFromDoi(doi) {
+        return normalizeDoi(doi).replace(/^arxiv:\s*/i, '').replace(/^10\.48550\/arxiv\./i, '');
+    }
+
+    /** Is the stored "doi" value really a DOI (and not some other URL)? */
+    function isRealDoi(doi) {
+        return /^10\.\d{4,9}\/\S+$/i.test(normalizeDoi(doi));
+    }
+
+    /** Builds a resolvable URL from a DOI (arXiv DOIs resolve to arxiv.org) */
+    function doiToUrl(doi) {
+        if (!doi) return '';
+        const raw = String(doi).trim();
+        if (isArxivDoi(raw)) return `https://arxiv.org/abs/${arxivIdFromDoi(raw)}`;
+        const clean = normalizeDoi(raw);
+        if (/^https?:\/\//i.test(clean)) return clean; // some other URL stored in the DOI field
+        return 'https://doi.org/' + encodeURI(clean).replace(/#/g, '%23').replace(/\?/g, '%3F');
+    }
+
+    // --- BibTeX / YAML escaping ---
+
+    const TEX_MAP = {
+        '\\': '\\textbackslash{}', '&': '\\&', '%': '\\%', '$': '\\$', '#': '\\#', '_': '\\_',
+        '{': '\\{', '}': '\\}', '~': '\\textasciitilde{}', '^': '\\textasciicircum{}'
+    };
+    const texEscape = (s) => oneLine(s).replace(/[\\&%$#_{}~^]/g, ch => TEX_MAP[ch]);
+    /** URL/DOI-safe escaping for BibTeX (only characters that break \url / comments) */
+    const texUrlEscape = (s) => String(s || '').replace(/[\s{}\\]/g, '').replace(/([%#])/g, '\\$1');
+
+    /** Double-quoted YAML scalar */
+    const yamlStr = (v) => '"' + String(v === null || v === undefined ? '' : v)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/[\r\n]+/g, ' ') + '"';
+
+    // --- Author parsing vocabulary ---
+
+    const PARTICLES = new Set(['da', 'de', 'do', 'dos', 'das', 'van', 'von', 'der', 'den', 'del', 'della', 'delle', 'di', 'du', 'le', 'la', 'bin', 'ibn', 'ten', 'ter', 'zu', "d'"]);
+    const NAME_SUFFIXES = new Set(['filho', 'neto', 'sobrinho', 'júnior', 'junior', 'jr', 'jr.', 'sr', 'sr.', 'ii', 'iii', 'iv']);
+    // Organization keywords (Unicode-aware boundaries so "Organização" etc. match)
+    const ORG_WORD_RE = /(?:^|[^\p{L}])(?:Universit(?:y|é|à|ät)|Universidade|Universidad|Organi[sz]ation|Organização|Organización|Institute|Instituto|Institut|Association|Associação|Asociación|Group|Grupo|Consortium|Consórcio|Committee|Comitê|Comité|Council|Conselho|Agency|Agência|Ministry|Ministério|Ministerio|Society|Sociedade|Sociedad|Foundation|Fundação|Fundación|Center|Centre|Centro|Department|Departamento|Bank|Banco|Program|Programme|Programa|Collaboration|Alliance|Commission|Comissão|Corporation|Inc\.?|Ltd\.?)(?=$|[^\p{L}])/iu;
+    // Well-known acronyms are matched case-sensitively
+    const ORG_ACRONYM_RE = /(?:^|[^\p{L}])(?:WHO|IPCC|UNESCO|UNICEF|OECD|IBGE|OMS|ONU|UN|NASA|FAO|IMF|IEEE|ACM)(?=$|[^\p{L}])/u;
+    const PLACEHOLDER_RE = /^(?:unknown(?:\s+author)?|desconhecido|autor\s+desconhecido|n\/a|s\/a)$/i;
+
+    const isParticle = (w) => PARTICLES.has(String(w).toLowerCase());
+    const isOrgName = (s) => {
+        const str = String(s || '').trim();
+        if (!str) return false;
+        if (ORG_WORD_RE.test(str) || ORG_ACRONYM_RE.test(str)) return true;
+        // Whole name is a single all-caps acronym such as "CAPES" or "CNPQ"
+        return /^\p{Lu}[\p{Lu}0-9&\-]{1,}$/u.test(str);
+    };
+
+    /** "J.", "A. B.", "J.-P.", "AB", "J" */
+    const isInitials = (s) => {
+        const str = String(s || '').trim();
+        if (!str) return false;
+        if (/^(?:\p{Lu}\.?\s*(?:-\s*)?)+$/u.test(str)) {
+            const letters = str.replace(/[^\p{L}]/gu, '');
+            const max = str.includes('.') ? 4 : 3;
+            return letters.length >= 1 && letters.length <= max;
+        }
+        return false;
+    };
+
+    /** Single surname, optionally with particles/suffix: "Smith", "da Silva", "van der Berg", "Silva Filho" */
+    const isSurnameLike = (s) => {
+        const tokens = String(s || '').trim().split(/\s+/).filter(Boolean);
+        if (!tokens.length || isInitials(s)) return false;
+        const core = tokens.filter(w => !isParticle(w) && !NAME_SUFFIXES.has(w.toLowerCase()));
+        return core.length === 1;
+    };
+
+    /** Splits a comma-containing chunk into raw author strings */
+    function splitCommaChunk(chunk) {
+        const parts = chunk.split(/\s*,\s*/).map(p => p.trim()).filter(Boolean);
+        if (parts.length <= 1) return parts;
+
+        if (parts.length === 2) {
+            const [a, b] = parts;
+            if (isInitials(b)) {
+                return [`${a}, ${b}`];
+            }
+            const bWords = b.split(/\s+/).filter(Boolean);
+            const hasOrgKeyword = (s) => ORG_WORD_RE.test(s) || ORG_ACRONYM_RE.test(s);
+            if (isSurnameLike(a) && bWords.length <= 3 && !hasOrgKeyword(a) && !hasOrgKeyword(b)) {
+                // "Smith, John" / "Silva, João Pedro" / "Sartre, Jean-Paul"
+                return [`${a}, ${b}`];
+            }
+            return parts; // "John Smith, Jane Doe"
+        }
+
+        // 3+ parts: pair "Family, Initials" greedily; everything else is a standalone name
+        const out = [];
+        for (let i = 0; i < parts.length; i++) {
+            const cur = parts[i];
+            const next = parts[i + 1];
+            if (next !== undefined && isSurnameLike(cur) && isInitials(next)) {
+                out.push(`${cur}, ${next}`);
+                i++;
+            } else {
+                out.push(cur);
+            }
+        }
+        return out;
+    }
+
+    /** Builds initials from a given-name string: "Jean-Paul" -> "J.-P.", "A.B." -> "A. B." */
+    function buildInitials(given) {
+        const prepared = String(given || '')
+            .replace(/\.(?=\p{L})/gu, '. ')
+            .trim();
+        let words = prepared.split(/\s+/).filter(Boolean).filter(w => !isParticle(w));
+        // Compact all-caps initials such as "AB"
+        if (words.length === 1 && /^\p{Lu}{2,3}$/u.test(words[0])) words = words[0].split('');
+        const dotted = [];
+        const compact = [];
+        words.forEach(w => {
+            const pieces = w.split('-').map(p => p.replace(/[.']/g, '')).filter(Boolean);
+            if (!pieces.length) return;
+            dotted.push(pieces.map(p => p.charAt(0).toUpperCase() + '.').join('-'));
+            compact.push(pieces.map(p => p.charAt(0).toUpperCase()).join(''));
+        });
+        return { initials: dotted.join(' '), initialsCompact: compact.join('') };
+    }
+
+    /** Parses a single raw author string into a structured name */
+    function parseSingleAuthor(raw) {
+        const item = String(raw || '').trim().replace(/^[,;]+|[,;]+$/g, '').trim();
+        if (!item || PLACEHOLDER_RE.test(item) || /^et\.?\s*al\.?$/i.test(item)) return null;
+
+        if (!item.includes(',') && isOrgName(item)) {
+            return { raw: item, family: item, familyCore: item, particle: '', given: '', initials: '', initialsCompact: '', isOrg: true };
+        }
+
+        let family = '';
+        let given = '';
+
+        if (item.includes(',')) {
+            const idx = item.indexOf(',');
+            family = item.slice(0, idx).trim();
+            given = item.slice(idx + 1).replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+        } else {
+            let tokens = item.split(/\s+/).filter(Boolean);
+            if (tokens.length === 1) {
+                family = tokens[0];
+            } else if (/^\p{Lu}{1,3}$/u.test(tokens[tokens.length - 1]) && !/^\p{Lu}+$/u.test(tokens[0])) {
+                // Vancouver style without comma: "Smith AB"
+                family = tokens.slice(0, -1).join(' ');
+                given = tokens[tokens.length - 1].split('').join('. ') + '.';
+            } else {
+                let start = tokens.length - 1;
+                // Keep suffixes (Filho, Neto, Jr.) attached to the family name
+                if (start > 1 && NAME_SUFFIXES.has(tokens[start].toLowerCase())) start--;
+                // Walk back over particles (da, van der, ...), keeping at least one given token
+                while (start - 1 > 0 && isParticle(tokens[start - 1])) start--;
+                family = tokens.slice(start).join(' ');
+                given = tokens.slice(0, start).join(' ');
+            }
+        }
+
+        // Separate leading particles in the family name ("da Silva" -> particle "da", core "Silva")
+        const famTokens = family.split(/\s+/).filter(Boolean);
+        let p = 0;
+        while (p < famTokens.length - 1 && isParticle(famTokens[p])) p++;
+        let particle = famTokens.slice(0, p).join(' ');
+        const familyCore = famTokens.slice(p).join(' ');
+
+        // Trailing particles written in the given part ("Silva, João da")
+        if (!particle && given) {
+            const gTokens = given.split(/\s+/);
+            let q = gTokens.length;
+            while (q > 1 && isParticle(gTokens[q - 1])) q--;
+            if (q < gTokens.length) {
+                particle = gTokens.slice(q).join(' ');
+                given = gTokens.slice(0, q).join(' ');
+                family = `${particle} ${familyCore}`;
+            }
+        }
+
+        const { initials, initialsCompact } = buildInitials(given);
+
+        return {
+            raw: item,
+            family,
+            familyCore: familyCore || family,
+            particle,
+            given,
+            initials,
+            initialsCompact,
+            isOrg: false
+        };
+    }
+
+    const MONTHS_ABNT = ['jan.', 'fev.', 'mar.', 'abr.', 'maio', 'jun.', 'jul.', 'ago.', 'set.', 'out.', 'nov.', 'dez.'];
+    const abntAccessDate = (d = new Date()) => `${d.getDate()} ${MONTHS_ABNT[d.getMonth()]} ${d.getFullYear()}`;
+
+    /** ABNT entry by title when there is no author: first word (plus a leading article) uppercased */
+    function abntTitleHead(title) {
+        const words = String(title || '').trim().split(/\s+/).filter(Boolean);
+        if (!words.length) return '';
+        const articles = new Set(['a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'the', 'an', 'el', 'la', 'los', 'las', 'le', 'les', 'il', 'lo']);
+        let n = 1;
+        if (words.length > 1 && articles.has(stripDiacritics(words[0]).toLowerCase())) n = 2;
+        return [...words.slice(0, n).map(w => w.toLocaleUpperCase('pt-BR')), ...words.slice(n)].join(' ');
+    }
+
+    // In-flight guards and pending (hidden) upload-form metadata
+    let inspectorFetchInFlight = false;
+    let formFetchInFlight = false;
+    let pendingUploadMeta = null;
+    let initialized = false;
+
     const Academic = {
+        // Exposed helpers (useful for other modules and tests)
+        normalizeDoi,
+        doiToUrl,
+        texEscape,
+        yamlStr,
+        endPunct,
+
         /**
          * Parses and identifies various academic identifiers:
          * Standard DOI, DOI URL, arXiv IDs (new & old), arXiv URLs, arXiv DOIs.
@@ -20,51 +367,48 @@ window.Lexicon = window.Lexicon || {};
             const input = rawInput.trim();
             if (!input) return null;
 
-            // 1. Check for arXiv URL (e.g. https://arxiv.org/abs/2301.12345 or /pdf/2301.12345.pdf)
-            const arxivUrlMatch = input.match(/arxiv\.org\/(?:abs|pdf)\/([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?\/\d{7}|\d{4}\.\d{4,5}(?:v\d+)?)(?:\.pdf)?/i);
+            const ARXIV_ID = '([a-zA-Z\\-]+(?:\\.[a-zA-Z\\-]+)?\\/\\d{7}(?:v\\d+)?|\\d{4}\\.\\d{4,5}(?:v\\d+)?)';
+
+            // 1. arXiv URL (e.g. https://arxiv.org/abs/2301.12345 or /pdf/2301.12345.pdf)
+            const arxivUrlMatch = input.match(new RegExp(`arxiv\\.org\\/(?:abs|pdf)\\/${ARXIV_ID}(?:\\.pdf)?`, 'i'));
             if (arxivUrlMatch) {
                 return { type: 'arxiv', id: arxivUrlMatch[1], raw: input };
             }
 
-            // 2. Check for arXiv DOI (e.g. 10.48550/arXiv.2301.12345)
-            const arxivDoiMatch = input.match(/(?:(?:https?:\/\/)?(?:dx\.)?doi\.org\/)?(10\.48550\/arxiv\.([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?\/\d{7}|\d{4}\.\d{4,5}(?:v\d+)?))/i);
+            // 2. arXiv DOI (e.g. 10.48550/arXiv.2301.12345)
+            const arxivDoiMatch = input.match(new RegExp(`(?:(?:https?:\\/\\/)?(?:dx\\.)?doi\\.org\\/)?10\\.48550\\/arxiv\\.${ARXIV_ID}`, 'i'));
             if (arxivDoiMatch) {
-                return { type: 'arxiv', id: arxivDoiMatch[2], doi: arxivDoiMatch[1], raw: input };
+                const baseId = arxivDoiMatch[1].replace(/v\d+$/i, '');
+                return { type: 'arxiv', id: arxivDoiMatch[1], doi: `10.48550/arXiv.${baseId}`, raw: input };
             }
 
-            // 3. Check for arXiv prefix (e.g. "arXiv:2301.12345" or "arxiv: math/0405076")
-            const arxivPrefixMatch = input.match(/^arxiv:\s*([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?\/\d{7}|\d{4}\.\d{4,5}(?:v\d+)?)/i);
+            // 3. arXiv prefix ("arXiv:2301.12345" or "arxiv: math/0405076")
+            const arxivPrefixMatch = input.match(new RegExp(`^arxiv:\\s*${ARXIV_ID}`, 'i'));
             if (arxivPrefixMatch) {
                 return { type: 'arxiv', id: arxivPrefixMatch[1], raw: input };
             }
 
-            // 4. Check for pure new-style arXiv ID (e.g. 2301.12345 or 2301.12345v2)
-            const arxivPureNewMatch = input.match(/^(\d{4}\.\d{4,5}(?:v\d+)?)$/i);
-            if (arxivPureNewMatch) {
-                return { type: 'arxiv', id: arxivPureNewMatch[1], raw: input };
+            // 4/5. Pure arXiv IDs (new and old style)
+            const arxivPureMatch = input.match(new RegExp(`^${ARXIV_ID}$`, 'i'));
+            if (arxivPureMatch) {
+                return { type: 'arxiv', id: arxivPureMatch[1], raw: input };
             }
 
-            // 5. Check for pure old-style arXiv ID (e.g. math/0405076 or hep-th/9912012)
-            const arxivPureOldMatch = input.match(/^([a-zA-Z\-]+(?:\.[a-zA-Z\-]+)?\/\d{7}(?:v\d+)?)$/i);
-            if (arxivPureOldMatch) {
-                return { type: 'arxiv', id: arxivPureOldMatch[1], raw: input };
-            }
-
-            // 6. Check for standard DOI URL (e.g. https://doi.org/10.1016/... or dx.doi.org/...)
-            const doiUrlMatch = input.match(/(?:https?:\/\/)?(?:dx\.)?doi\.org\/(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/i);
+            // 6. DOI URL (doi.org or dx.doi.org) — no whitespace allowed in the DOI
+            const doiUrlMatch = input.match(/(?:https?:\/\/)?(?:dx\.)?doi\.org\/(10\.\d{4,9}\/\S+)/i);
             if (doiUrlMatch) {
-                return { type: 'doi', doi: doiUrlMatch[1].replace(/[.,;)]+$/, ''), raw: input };
+                let doi = doiUrlMatch[1];
+                try { doi = decodeURIComponent(doi); } catch (e) { /* keep raw */ }
+                if (!/\s/.test(doi)) {
+                    return { type: 'doi', doi: stripTrailingDoiPunct(doi), raw: input };
+                }
             }
 
-            // 7. Check for standard DOI string (e.g. 10.1016/j.env.2024.01.004)
-            const doiMatch = input.match(/^(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)$/i);
+            // 7. Bare DOI, optionally prefixed with "doi:"
+            const bare = input.replace(/^doi:\s*/i, '');
+            const doiMatch = bare.match(/^(10\.\d{4,9}\/\S+)$/i);
             if (doiMatch) {
-                return { type: 'doi', doi: doiMatch[1].replace(/[.,;)]+$/, ''), raw: input };
-            }
-
-            // 8. If starts with 10. and has a slash, treat as DOI
-            if (/^10\.\d{4,9}\/.+/i.test(input)) {
-                return { type: 'doi', doi: input.replace(/[.,;)]+$/, ''), raw: input };
+                return { type: 'doi', doi: stripTrailingDoiPunct(doiMatch[1]), raw: input };
             }
 
             return null;
@@ -89,15 +433,30 @@ window.Lexicon = window.Lexicon || {};
         },
 
         /**
-         * Removes HTML/XML tags and normalizes spaces
+         * Removes HTML/XML tags, decodes HTML entities and normalizes spaces
          * @param {string} str 
          * @returns {string}
          */
         cleanText(str) {
             if (!str) return '';
-            return String(str)
-                .replace(/<[^>]+>/g, ' ')
+            const noTags = String(str).replace(/<[^>]+>/g, ' ');
+            return decodeEntities(noTags)
+                .replace(/\u00a0/g, ' ')
                 .replace(/\s+/g, ' ')
+                .trim();
+        },
+
+        /**
+         * Cleans an abstract (JATS/HTML) and strips a leading "Abstract"/"Resumo" heading
+         * @param {string} str
+         * @returns {string}
+         */
+        cleanAbstract(str) {
+            if (!str) return '';
+            const withoutHeading = String(str).replace(
+                /^\s*<(?:jats:)?title[^>]*>\s*(?:abstract|resumo|summary|resumen|résumé)\s*[:.]?\s*<\/(?:jats:)?title>/i, ' ');
+            return this.cleanText(withoutHeading)
+                .replace(/^(?:abstract|resumo|summary|resumen|résumé)\s*[:.\-–—]?\s+(?=\S)/i, '')
                 .trim();
         },
 
@@ -107,7 +466,7 @@ window.Lexicon = window.Lexicon || {};
          * @returns {Promise<Object|null>}
          */
         async fetchFromCrossRef(doi) {
-            const cleanDoi = doi.trim();
+            const cleanDoi = normalizeDoi(doi);
             const url = `https://api.crossref.org/works/${encodeURIComponent(cleanDoi)}`;
             
             const controller = new AbortController();
@@ -131,32 +490,34 @@ window.Lexicon = window.Lexicon || {};
                 const rawTitle = Array.isArray(msg.title) && msg.title.length ? msg.title[0] : (msg.title || '');
                 const title = this.cleanText(rawTitle);
 
-                // Authors
+                // Authors ("Given Family", comma-separated; organizations by name)
                 let authors = '';
                 if (Array.isArray(msg.author) && msg.author.length > 0) {
                     authors = msg.author.map(a => {
-                        if (a.name) return a.name;
+                        if (a.name) return this.cleanText(a.name);
                         const parts = [];
-                        if (a.given) parts.push(a.given);
-                        if (a.family) parts.push(a.family);
+                        if (a.given) parts.push(this.cleanText(a.given));
+                        if (a.family) parts.push(this.cleanText(a.family));
                         return parts.join(' ');
                     }).filter(Boolean).join(', ');
                 }
 
-                // Year
+                // Year: issued > published-print > published-online > created
                 let year = null;
-                const dateParts = msg['published-print']?.['date-parts'] ||
-                                  msg['published-online']?.['date-parts'] ||
-                                  msg.created?.['date-parts'] ||
-                                  msg.issued?.['date-parts'];
-                if (dateParts && dateParts[0] && dateParts[0][0]) {
-                    year = parseInt(dateParts[0][0], 10);
+                const candidates = [msg.issued, msg['published-print'], msg['published-online'], msg.created];
+                for (const c of candidates) {
+                    const dp = c && c['date-parts'];
+                    if (dp && dp[0] && dp[0][0]) {
+                        year = parseInt(dp[0][0], 10);
+                        if (!isNaN(year)) break;
+                        year = null;
+                    }
                 }
 
                 // Journal / Publication
-                const publication = (Array.isArray(msg['container-title']) && msg['container-title'].length)
+                const publication = this.cleanText((Array.isArray(msg['container-title']) && msg['container-title'].length)
                     ? msg['container-title'][0]
-                    : (msg.publisher || '');
+                    : (msg.publisher || ''));
 
                 // Volume, Issue, Pages
                 const volume = msg.volume ? String(msg.volume) : '';
@@ -164,7 +525,7 @@ window.Lexicon = window.Lexicon || {};
                 const pages = msg.page ? String(msg.page) : '';
 
                 // Abstract
-                const abstract = msg.abstract ? this.cleanText(msg.abstract) : '';
+                const abstract = msg.abstract ? this.cleanAbstract(msg.abstract) : '';
 
                 // Document type
                 const isBook = msg.type === 'book' || msg.type === 'monograph' || msg.type === 'edited-book';
@@ -178,7 +539,7 @@ window.Lexicon = window.Lexicon || {};
                     volume,
                     issue,
                     pages,
-                    doi: msg.DOI || cleanDoi,
+                    doi: normalizeDoi(msg.DOI || cleanDoi),
                     summary: abstract,
                     coverType,
                     source: 'CrossRef'
@@ -195,7 +556,7 @@ window.Lexicon = window.Lexicon || {};
          * @returns {Promise<Object|null>}
          */
         async fetchFromOpenAlex(doiOrArxivId) {
-            const id = doiOrArxivId.trim();
+            const id = normalizeDoi(doiOrArxivId);
             const encodedTarget = encodeURIComponent(id.startsWith('10.') ? `https://doi.org/${id}` : id);
             const url = `https://api.openalex.org/works/${encodedTarget}`;
 
@@ -217,16 +578,17 @@ window.Lexicon = window.Lexicon || {};
                 const authors = (data.authorships || [])
                     .map(a => a.author?.display_name)
                     .filter(Boolean)
+                    .map(n => this.cleanText(n))
                     .join(', ');
                 const year = data.publication_year || null;
-                const publication = data.primary_location?.source?.display_name ||
+                const publication = this.cleanText(data.primary_location?.source?.display_name ||
                                     data.host_venue?.display_name ||
-                                    (data.type === 'preprint' ? 'arXiv' : '');
+                                    (data.type === 'preprint' ? 'arXiv' : ''));
                 
                 const volume = data.biblio?.volume ? String(data.biblio.volume) : '';
                 const issue = data.biblio?.issue ? String(data.biblio.issue) : '';
                 let pages = '';
-                if (data.biblio?.first_page && data.biblio?.last_page) {
+                if (data.biblio?.first_page && data.biblio?.last_page && data.biblio.first_page !== data.biblio.last_page) {
                     pages = `${data.biblio.first_page}-${data.biblio.last_page}`;
                 } else if (data.biblio?.first_page) {
                     pages = String(data.biblio.first_page);
@@ -234,10 +596,10 @@ window.Lexicon = window.Lexicon || {};
 
                 let doi = id;
                 if (data.doi) {
-                    doi = data.doi.replace(/^https?:\/\/doi\.org\//i, '');
+                    doi = normalizeDoi(data.doi);
                 }
 
-                const abstract = this.reconstructInvertedAbstract(data.abstract_inverted_index);
+                const abstract = this.cleanAbstract(this.reconstructInvertedAbstract(data.abstract_inverted_index));
                 const coverType = data.type === 'book' ? 'book' : 'pdf';
 
                 return {
@@ -266,6 +628,7 @@ window.Lexicon = window.Lexicon || {};
          */
         async fetchFromArXivExport(arxivId) {
             const cleanId = arxivId.replace(/^arxiv:\s*/i, '').trim();
+            const baseId = cleanId.replace(/v\d+$/i, '');
             const url = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}`;
 
             const controller = new AbortController();
@@ -295,8 +658,9 @@ window.Lexicon = window.Lexicon || {};
                     year = parseInt(published.substring(0, 4), 10);
                 }
 
-                const summary = this.cleanText(entry.querySelector('summary')?.textContent || '');
-                const arxivDoi = `10.48550/arXiv.${cleanId}`;
+                const summary = this.cleanAbstract(entry.querySelector('summary')?.textContent || '');
+                // DataCite DOIs for arXiv never carry the version suffix
+                const arxivDoi = `10.48550/arXiv.${baseId}`;
 
                 return {
                     title,
@@ -329,13 +693,14 @@ window.Lexicon = window.Lexicon || {};
 
             if (parsed.type === 'arxiv') {
                 const arxivId = parsed.id;
-                const arxivDoi = parsed.doi || `10.48550/arXiv.${arxivId}`;
+                const baseId = arxivId.replace(/v\d+$/i, '');
+                const arxivDoi = parsed.doi || `10.48550/arXiv.${baseId}`;
 
                 // 1. Try OpenAlex by arXiv DOI
                 let meta = await this.fetchFromOpenAlex(arxivDoi);
                 if (meta) return meta;
 
-                // 2. Try official arXiv Export API
+                // 2. Try official arXiv Export API (version kept for the exact record)
                 meta = await this.fetchFromArXivExport(arxivId);
                 if (meta) return meta;
 
@@ -363,42 +728,57 @@ window.Lexicon = window.Lexicon || {};
             return null;
         },
 
+        /** Sets the busy/idle visual state of a fetch button */
+        _setFetchButtonState(prefix, busy) {
+            const btn = document.getElementById(`btn-${prefix}-fetch-doi`);
+            const icon = document.getElementById(`icon-${prefix}-fetch-doi`);
+            const text = document.getElementById(`text-${prefix}-fetch-doi`);
+            if (btn) btn.disabled = !!busy;
+            if (icon) icon.className = busy
+                ? 'ph ph-spinner animate-spin text-base text-jungle'
+                : 'ph ph-cloud-arrow-down text-base text-jungle';
+            if (text) {
+                text.textContent = busy
+                    ? tr('inspector.fetchingMetadata', 'Buscando...')
+                    : tr('inspector.fetchMetadata', 'Buscar Metadados');
+            }
+        },
+
         /**
          * UI Action: Fetches metadata for current input in Inspector Modal
          */
         async fetchInspectorMetadata() {
+            if (inspectorFetchInFlight) return;
             const doiInput = document.getElementById('inspector-doi');
             if (!doiInput) return;
             const rawVal = doiInput.value.trim();
 
             if (!rawVal) {
-                const warnMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.promptEnterDoi')
-                    : 'Please enter a DOI or arXiv ID first';
-                window.Lexicon.UI.Toast.show(warnMsg, 'info');
+                toast(tr('inspector.promptEnterDoi', 'Informe primeiro um DOI ou ID arXiv'), 'info');
                 doiInput.focus();
                 return;
             }
 
-            const btn = document.getElementById('btn-inspector-fetch-doi');
-            const icon = document.getElementById('icon-inspector-fetch-doi');
-            const text = document.getElementById('text-inspector-fetch-doi');
+            const state = window.Lexicon.State;
+            // Capture the target BEFORE awaiting: the user may switch documents meanwhile
+            const targetId = state ? state.inspectedArticleId : null;
 
-            if (btn) btn.disabled = true;
-            if (icon) icon.className = 'ph ph-spinner animate-spin text-base text-jungle';
-            if (text) {
-                text.textContent = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.fetchingMetadata')
-                    : 'Fetching...';
-            }
+            inspectorFetchInFlight = true;
+            this._setFetchButtonState('inspector', true);
 
             try {
                 const meta = await this.fetchMetadata(rawVal);
+
+                const modal = document.getElementById('inspector-modal');
+                const stale = !state || state.inspectedArticleId !== targetId ||
+                    !modal || modal.classList.contains('hidden');
+                if (stale) {
+                    toast(tr('inspector.metadataStale', 'Metadados ignorados: o documento inspecionado mudou.'), 'info');
+                    return;
+                }
+
                 if (!meta) {
-                    const notFoundMsg = window.Lexicon.I18n
-                        ? window.Lexicon.I18n.t('inspector.metadataNotFound')
-                        : 'Could not find metadata for this identifier.';
-                    window.Lexicon.UI.Toast.show(notFoundMsg, 'error');
+                    toast(tr('inspector.metadataNotFound', 'Não foi possível encontrar metadados para este identificador.'), 'error');
                     return;
                 }
 
@@ -414,68 +794,56 @@ window.Lexicon = window.Lexicon || {};
                 if (authorEl && meta.authors) authorEl.value = meta.authors;
                 if (yearEl && meta.year) yearEl.value = meta.year;
                 if (pubEl && meta.publication) pubEl.value = meta.publication;
-                if (doiInput && meta.doi) doiInput.value = meta.doi;
+                if (meta.doi) doiInput.value = meta.doi;
 
                 // Update summary if currently blank or user confirms
+                let summaryApplied = false;
                 if (summaryEl && meta.summary) {
                     if (!summaryEl.value.trim() || confirm(
-                        window.Lexicon.I18n
-                            ? window.Lexicon.I18n.t('inspector.confirmOverwriteSummary')
-                            : 'Update abstract/summary with official metadata?'
+                        tr('inspector.confirmOverwriteSummary', 'Atualizar o resumo com os metadados oficiais?')
                     )) {
                         summaryEl.value = meta.summary;
+                        summaryApplied = true;
                     }
                 }
 
                 // Update external link
                 if (doiLinkEl && meta.doi) {
-                    let doiUrl = meta.doi;
-                    if (/arxiv/i.test(meta.doi)) {
-                        const cleanArxiv = meta.doi.replace(/^arxiv:\s*/i, '').replace(/^10\.48550\/arxiv\./i, '');
-                        doiUrl = `https://arxiv.org/abs/${cleanArxiv}`;
-                    } else if (!doiUrl.startsWith('http')) {
-                        doiUrl = `https://doi.org/${meta.doi}`;
-                    }
-                    doiLinkEl.href = doiUrl;
+                    doiLinkEl.href = doiToUrl(meta.doi);
                     doiLinkEl.classList.remove('hidden');
                 }
 
-                // Also store extra biblio metadata in active article object if available
-                const state = window.Lexicon.State;
-                const article = state.articles.find(a => a.id === state.inspectedArticleId);
+                // Store extra biblio metadata in the captured article
+                const article = (state.articles || []).find(a => a.id === targetId);
                 if (article) {
                     if (meta.title) article.title = meta.title;
                     if (meta.authors) article.authors = meta.authors;
                     if (meta.year) article.year = meta.year;
                     if (meta.publication) article.publication = meta.publication;
                     if (meta.doi) article.doi = meta.doi;
-                    if (meta.volume) article.volume = meta.volume;
-                    if (meta.issue) article.issue = meta.issue;
-                    if (meta.pages) article.pages = meta.pages;
-                    if (summaryEl && summaryEl.value) article.summary = summaryEl.value;
+                    // Always replace biblio details so stale values from a previous record don't linger
+                    article.volume = meta.volume || '';
+                    article.issue = meta.issue || '';
+                    article.pages = meta.pages || '';
+                    if (summaryApplied) article.summary = meta.summary;
 
-                    window.Lexicon.Storage.save();
-                    window.Lexicon.Articles.render();
+                    try {
+                        await window.Lexicon.Storage.save();
+                    } catch (saveErr) {
+                        console.error('Error saving metadata:', saveErr);
+                    }
+                    if (window.Lexicon.Articles && typeof window.Lexicon.Articles.render === 'function') {
+                        window.Lexicon.Articles.render();
+                    }
                 }
 
-                const successMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.metadataSuccess', { source: meta.source })
-                    : `Metadata imported from ${meta.source}!`;
-                window.Lexicon.UI.Toast.show(successMsg, 'success');
+                toast(tr('inspector.metadataSuccess', 'Metadados importados com sucesso de {source}!', { source: meta.source }), 'success');
             } catch (err) {
                 console.error('Error in fetchInspectorMetadata:', err);
-                const errMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.metadataError')
-                    : 'Error fetching metadata.';
-                window.Lexicon.UI.Toast.show(errMsg, 'error');
+                toast(tr('inspector.metadataError', 'Erro ao consultar metadados.'), 'error');
             } finally {
-                if (btn) btn.disabled = false;
-                if (icon) icon.className = 'ph ph-cloud-arrow-down text-base text-jungle';
-                if (text) {
-                    text.textContent = window.Lexicon.I18n
-                        ? window.Lexicon.I18n.t('inspector.fetchMetadata')
-                        : 'Buscar Metadados';
-                }
+                inspectorFetchInFlight = false;
+                this._setFetchButtonState('inspector', false);
             }
         },
 
@@ -483,38 +851,31 @@ window.Lexicon = window.Lexicon || {};
          * UI Action: Fetches metadata for current input in Add Document Modal (Single Tab)
          */
         async fetchUploadFormMetadata() {
+            if (formFetchInFlight) return;
             const doiInput = document.getElementById('form-doi');
             if (!doiInput) return;
             const rawVal = doiInput.value.trim();
 
             if (!rawVal) {
-                const warnMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.promptEnterDoi')
-                    : 'Please enter a DOI or arXiv ID first';
-                window.Lexicon.UI.Toast.show(warnMsg, 'info');
+                toast(tr('inspector.promptEnterDoi', 'Informe primeiro um DOI ou ID arXiv'), 'info');
                 doiInput.focus();
                 return;
             }
 
-            const btn = document.getElementById('btn-form-fetch-doi');
-            const icon = document.getElementById('icon-form-fetch-doi');
-            const text = document.getElementById('text-form-fetch-doi');
-
-            if (btn) btn.disabled = true;
-            if (icon) icon.className = 'ph ph-spinner animate-spin text-base text-jungle';
-            if (text) {
-                text.textContent = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.fetchingMetadata')
-                    : 'Fetching...';
-            }
+            formFetchInFlight = true;
+            pendingUploadMeta = null;
+            this._setFetchButtonState('form', true);
 
             try {
                 const meta = await this.fetchMetadata(rawVal);
                 if (!meta) {
-                    const notFoundMsg = window.Lexicon.I18n
-                        ? window.Lexicon.I18n.t('inspector.metadataNotFound')
-                        : 'Could not find metadata for this identifier.';
-                    window.Lexicon.UI.Toast.show(notFoundMsg, 'error');
+                    toast(tr('inspector.metadataNotFound', 'Não foi possível encontrar metadados para este identificador.'), 'error');
+                    return;
+                }
+
+                // The user may have changed the identifier while the request was running
+                if (doiInput.value.trim() !== rawVal) {
+                    toast(tr('inspector.metadataStaleForm', 'Metadados ignorados: o identificador foi alterado durante a busca.'), 'info');
                     return;
                 }
 
@@ -529,160 +890,140 @@ window.Lexicon = window.Lexicon || {};
                 if (yearEl && meta.year) yearEl.value = meta.year;
                 if (pubEl && meta.publication) pubEl.value = meta.publication;
                 if (summaryEl && meta.summary) summaryEl.value = meta.summary;
-                if (doiInput && meta.doi) doiInput.value = meta.doi;
+                if (meta.doi) doiInput.value = meta.doi;
 
-                const successMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.metadataSuccess', { source: meta.source })
-                    : `Metadata imported from ${meta.source}!`;
-                window.Lexicon.UI.Toast.show(successMsg, 'success');
+                // Fields without visible inputs are kept in hidden state for the article creator
+                pendingUploadMeta = {
+                    doi: normalizeDoi(meta.doi || rawVal),
+                    volume: meta.volume || '',
+                    issue: meta.issue || '',
+                    pages: meta.pages || '',
+                    coverType: meta.coverType || 'pdf',
+                    source: meta.source || ''
+                };
+
+                toast(tr('inspector.metadataSuccess', 'Metadados importados com sucesso de {source}!', { source: meta.source }), 'success');
             } catch (err) {
                 console.error('Error in fetchUploadFormMetadata:', err);
-                const errMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.metadataError')
-                    : 'Error fetching metadata.';
-                window.Lexicon.UI.Toast.show(errMsg, 'error');
+                toast(tr('inspector.metadataError', 'Erro ao consultar metadados.'), 'error');
             } finally {
-                if (btn) btn.disabled = false;
-                if (icon) icon.className = 'ph ph-cloud-arrow-down text-base text-jungle';
-                if (text) {
-                    text.textContent = window.Lexicon.I18n
-                        ? window.Lexicon.I18n.t('inspector.fetchMetadata')
-                        : 'Buscar Metadados';
-                }
+                formFetchInFlight = false;
+                this._setFetchButtonState('form', false);
             }
+        },
+
+        /**
+         * Returns and clears metadata fetched in the upload form that has no visible input
+         * (volume, issue, pages, coverType). Consumers should compare `.doi` with the
+         * DOI being saved (normalizeDoi) before applying it.
+         * @returns {{doi:string, volume:string, issue:string, pages:string, coverType:string, source:string}|null}
+         */
+        consumePendingUploadMeta() {
+            const meta = pendingUploadMeta;
+            pendingUploadMeta = null;
+            return meta;
+        },
+
+        /** Discards pending upload-form metadata (e.g. when the form is reset/closed) */
+        clearPendingUploadMeta() {
+            pendingUploadMeta = null;
         },
 
         /**
          * Tokenizes and parses author strings into structured author items
          * @param {string} authorStr 
-         * @returns {Array<{ raw: string, family: string, given: string, initials: string, initialsCompact: string }>}
+         * @returns {Array<{ raw: string, family: string, familyCore: string, particle: string, given: string, initials: string, initialsCompact: string, isOrg: boolean }>}
          */
         parseAuthors(authorStr) {
             if (!authorStr || typeof authorStr !== 'string') return [];
-            const cleaned = authorStr.trim();
+            let cleaned = authorStr.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+            if (!cleaned || PLACEHOLDER_RE.test(cleaned)) return [];
+
+            // Ignore "et al."
+            cleaned = cleaned.replace(/[,;]?\s*\bet\.?\s+al\b\.?/gi, '').replace(/[,;\s]+$/, '').trim();
             if (!cleaned) return [];
 
-            let rawList = [];
-            if (/\s+and\s+/i.test(cleaned)) {
-                rawList = cleaned.split(/\s+and\s+/i);
-            } else if (cleaned.includes(';')) {
-                rawList = cleaned.split(';');
-            } else if (cleaned.includes(',')) {
-                const commaCount = (cleaned.match(/,/g) || []).length;
-                if (commaCount === 1) {
-                    // "Surname, Given"
-                    rawList = [cleaned];
-                } else if (/^[A-Za-zÀ-ÿ\-]+,\s*[A-ZÀ-ÿ]\.(?:\s*[A-ZÀ-ÿ]\.)?,/i.test(cleaned)) {
-                    // Pattern "Surname, Initials, Surname, Initials..."
-                    const parts = cleaned.split(/\s*,\s*/);
-                    for (let i = 0; i < parts.length; i += 2) {
-                        if (i + 1 < parts.length) {
-                            rawList.push(`${parts[i]}, ${parts[i+1]}`);
+            const rawList = [];
+            cleaned.split(/\s*;\s*/).filter(Boolean).forEach(segment => {
+                // Organization names may legitimately contain "and"/"&"
+                if (!segment.includes(',') && isOrgName(segment)) {
+                    rawList.push(segment);
+                    return;
+                }
+                segment.split(/\s*,?\s+(?:and|&)\s+|\s*&\s*/i)
+                    .map(s => s.trim())
+                    .filter(Boolean)
+                    .forEach(chunk => {
+                        if (chunk.includes(',')) {
+                            splitCommaChunk(chunk).forEach(r => rawList.push(r));
                         } else {
-                            rawList.push(parts[i]);
+                            rawList.push(chunk);
                         }
-                    }
-                } else {
-                    rawList = cleaned.split(',');
-                }
-            } else {
-                rawList = [cleaned];
-            }
+                    });
+            });
 
-            return rawList.map(raw => {
-                const item = raw.trim();
-                if (!item) return null;
-
-                let family = '';
-                let given = '';
-
-                if (item.includes(',')) {
-                    const parts = item.split(',').map(s => s.trim());
-                    family = parts[0] || '';
-                    given = parts.slice(1).join(' ') || '';
-                } else {
-                    const tokens = item.split(/\s+/).filter(Boolean);
-                    if (tokens.length === 1) {
-                        family = tokens[0];
-                        given = '';
-                    } else {
-                        family = tokens[tokens.length - 1];
-                        given = tokens.slice(0, -1).join(' ');
-                    }
-                }
-
-                const givenWords = given ? given.replace(/[.]/g, '').split(/\s+/).filter(Boolean) : [];
-                const initialsWithDots = givenWords.map(w => w.charAt(0).toUpperCase() + '.').join(' ');
-                const initialsCompact = givenWords.map(w => w.charAt(0).toUpperCase()).join('');
-
-                return {
-                    raw: item,
-                    family,
-                    given,
-                    initials: initialsWithDots,
-                    initialsCompact
-                };
-            }).filter(Boolean);
+            return rawList.map(parseSingleAuthor).filter(Boolean);
         },
 
         /**
-         * Formats reference according to Brazilian ABNT NBR 6023 standard
+         * Formats reference according to Brazilian ABNT NBR 6023:2018 standard
          * @param {Object} article 
          * @returns {string}
          */
         formatABNT(article) {
             if (!article) return '';
             const authors = this.parseAuthors(article.authors);
-            let authorText = '';
 
-            if (authors.length === 0) {
-                authorText = (article.title || 'DOCUMENTO').toUpperCase().split(/\s+/)[0];
-            } else if (authors.length <= 3) {
-                authorText = authors.map(a => {
-                    const fam = (a.family || a.raw).toUpperCase();
-                    return a.given ? `${fam}, ${a.given}` : fam;
-                }).join('; ');
-            } else {
-                // 4 or more authors: First author et al.
-                const first = authors[0];
-                const fam = (first.family || first.raw).toUpperCase();
-                authorText = first.given ? `${fam}, ${first.given} et al.` : `${fam} et al.`;
-            }
+            const abntName = (a) => {
+                if (a.isOrg) return a.family.toLocaleUpperCase('pt-BR');
+                const core = (a.familyCore || a.family || a.raw).toLocaleUpperCase('pt-BR');
+                const given = [a.given, a.particle].filter(Boolean).join(' ');
+                return given ? `${core}, ${given}` : core;
+            };
 
-            const authorPart = authorText.endsWith('.') ? authorText : authorText + '.';
-            const title = article.title ? article.title.trim().replace(/\.+$/, '') : 'Sem título';
+            const title = cleanTitle(article.title) || tr('academic.untitled', 'Sem título');
             const isBook = article.coverType === 'book';
-            const pub = article.publication ? article.publication.trim() : '';
-            const year = article.year || 's.d.';
-            const doi = article.doi ? article.doi.trim() : '';
+            const pub = oneLine(article.publication);
+            const year = article.year ? String(article.year).trim() : '[s.d.]';
+            const doi = article.doi ? String(article.doi).trim() : '';
+
+            let lead;
+            if (authors.length === 0) {
+                // Entry by title: first word uppercased, rest of the title as-is (no repetition)
+                lead = endPunct(abntTitleHead(title));
+            } else {
+                let authorText;
+                if (authors.length <= 3) {
+                    authorText = authors.map(abntName).join('; ');
+                } else {
+                    authorText = `${abntName(authors[0])} et al.`;
+                }
+                lead = `${endPunct(authorText)} ${endPunct(title)}`;
+            }
 
             let citation = '';
             if (isBook) {
-                citation = `${authorPart} ${title}. ${pub ? pub + ', ' : ''}${year}.`;
+                citation = `${lead} ${pub ? pub + ', ' : ''}${year}.`;
             } else {
                 const details = [];
                 if (article.volume) details.push(`v. ${article.volume}`);
                 if (article.issue) details.push(`n. ${article.issue}`);
                 if (article.pages) details.push(`p. ${article.pages}`);
                 details.push(year);
-                const detailsStr = details.join(', ');
 
                 if (pub) {
-                    citation = `${authorPart} ${title}. ${pub}, ${detailsStr}.`;
+                    citation = `${lead} ${pub}, ${details.join(', ')}.`;
                 } else {
-                    citation = `${authorPart} ${title}. ${year}.`;
+                    citation = `${lead} ${year}.`;
                 }
             }
 
             if (doi) {
-                let doiUrl = doi;
-                if (/arxiv/i.test(doi)) {
-                    const cleanArxiv = doi.replace(/^arxiv:\s*/i, '').replace(/^10\.48550\/arxiv\./i, '');
-                    doiUrl = `https://arxiv.org/abs/${cleanArxiv}`;
-                } else if (!doiUrl.startsWith('http')) {
-                    doiUrl = `https://doi.org/${doi}`;
+                if (isArxivDoi(doi) || !isRealDoi(doi)) {
+                    citation += ` Disponível em: ${doiToUrl(doi)}. Acesso em: ${abntAccessDate()}.`;
+                } else {
+                    citation += ` DOI: ${normalizeDoi(doi)}.`;
                 }
-                citation += ` Disponível em: <${doiUrl}>.`;
             }
 
             return citation;
@@ -696,37 +1037,33 @@ window.Lexicon = window.Lexicon || {};
         formatAPA(article) {
             if (!article) return '';
             const authors = this.parseAuthors(article.authors);
-            let authorText = '';
+            const apaName = (a) => (a.isOrg || !a.initials) ? a.family : `${a.family}, ${a.initials}`;
 
-            if (authors.length === 0) {
-                authorText = article.title || 'Unknown';
-            } else if (authors.length === 1) {
-                const a = authors[0];
-                authorText = a.initials ? `${a.family}, ${a.initials}` : a.family;
+            let authorText = '';
+            if (authors.length === 1) {
+                authorText = apaName(authors[0]);
             } else if (authors.length === 2) {
-                const a1 = authors[0].initials ? `${authors[0].family}, ${authors[0].initials}` : authors[0].family;
-                const a2 = authors[1].initials ? `${authors[1].family}, ${authors[1].initials}` : authors[1].family;
-                authorText = `${a1}, & ${a2}`;
-            } else if (authors.length <= 20) {
-                const list = authors.map(a => a.initials ? `${a.family}, ${a.initials}` : a.family);
+                authorText = `${apaName(authors[0])}, & ${apaName(authors[1])}`;
+            } else if (authors.length > 2 && authors.length <= 20) {
+                const list = authors.map(apaName);
                 const last = list.pop();
                 authorText = `${list.join(', ')}, & ${last}`;
-            } else {
+            } else if (authors.length > 20) {
                 // Over 20 authors: first 19, ..., last
-                const list = authors.slice(0, 19).map(a => a.initials ? `${a.family}, ${a.initials}` : a.family);
-                const last = authors[authors.length - 1];
-                const lastStr = last.initials ? `${last.family}, ${last.initials}` : last.family;
-                authorText = `${list.join(', ')}, ... ${lastStr}`;
+                const list = authors.slice(0, 19).map(apaName);
+                authorText = `${list.join(', ')}, ... ${apaName(authors[authors.length - 1])}`;
             }
 
-            const authorPart = authorText.endsWith('.') ? authorText : authorText + '.';
             const year = article.year ? `(${article.year})` : '(n.d.)';
-            const title = article.title ? article.title.trim().replace(/\.+$/, '') : 'Untitled';
-            const isBook = article.coverType === 'book';
-            const pub = article.publication ? article.publication.trim() : '';
-            const doi = article.doi ? article.doi.trim() : '';
+            const title = cleanTitle(article.title) || 'Untitled';
+            const pub = oneLine(article.publication);
+            const doi = article.doi ? String(article.doi).trim() : '';
 
-            let citation = `${authorPart} ${year}. ${title}.`;
+            // No author: the title moves into the author position (not repeated)
+            let citation = authorText
+                ? `${endPunct(authorText)} ${year}. ${endPunct(title)}`
+                : `${endPunct(title)} ${year}.`;
+
             if (pub) {
                 let loc = pub;
                 if (article.volume) {
@@ -736,18 +1073,11 @@ window.Lexicon = window.Lexicon || {};
                 if (article.pages) {
                     loc += `, ${article.pages}`;
                 }
-                citation += ` ${loc}.`;
+                citation += ` ${endPunct(loc)}`;
             }
 
             if (doi) {
-                let doiUrl = doi;
-                if (/arxiv/i.test(doi)) {
-                    const cleanArxiv = doi.replace(/^arxiv:\s*/i, '').replace(/^10\.48550\/arxiv\./i, '');
-                    doiUrl = `https://arxiv.org/abs/${cleanArxiv}`;
-                } else if (!doiUrl.startsWith('http')) {
-                    doiUrl = `https://doi.org/${doi}`;
-                }
-                citation += ` ${doiUrl}`;
+                citation += ` ${doiToUrl(doi)}`;
             }
 
             return citation;
@@ -761,60 +1091,53 @@ window.Lexicon = window.Lexicon || {};
         formatChicago(article) {
             if (!article) return '';
             const authors = this.parseAuthors(article.authors);
-            let authorText = '';
+            const inverted = (a) => (a.isOrg || !a.given) ? a.family : `${a.family}, ${a.given}`;
+            const direct = (a) => (a.isOrg || !a.given) ? a.family : `${a.given} ${a.family}`;
 
-            if (authors.length === 0) {
-                authorText = article.title || 'Unknown';
-            } else if (authors.length === 1) {
-                authorText = authors[0].given ? `${authors[0].family}, ${authors[0].given}` : authors[0].family;
-            } else if (authors.length === 2) {
-                const a1 = authors[0].given ? `${authors[0].family}, ${authors[0].given}` : authors[0].family;
-                const a2 = authors[1].given ? `${authors[1].given} ${authors[1].family}` : authors[1].family;
-                authorText = `${a1}, and ${a2}`;
-            } else if (authors.length === 3) {
-                const a1 = authors[0].given ? `${authors[0].family}, ${authors[0].given}` : authors[0].family;
-                const a2 = authors[1].given ? `${authors[1].given} ${authors[1].family}` : authors[1].family;
-                const a3 = authors[2].given ? `${authors[2].given} ${authors[2].family}` : authors[2].family;
-                authorText = `${a1}, ${a2}, and ${a3}`;
-            } else {
-                const first = authors[0];
-                authorText = (first.given ? `${first.family}, ${first.given}` : first.family) + ', et al.';
+            let authorText = '';
+            if (authors.length === 1) {
+                authorText = inverted(authors[0]);
+            } else if (authors.length >= 2 && authors.length <= 10) {
+                const list = [inverted(authors[0]), ...authors.slice(1).map(direct)];
+                const last = list.pop();
+                authorText = `${list.join(', ')}, and ${last}`;
+            } else if (authors.length > 10) {
+                const list = [inverted(authors[0]), ...authors.slice(1, 7).map(direct)];
+                authorText = `${list.join(', ')}, et al.`;
             }
 
-            const authorPart = authorText.endsWith('.') ? authorText : authorText + '.';
             const year = article.year || 'n.d.';
-            const title = article.title ? article.title.trim().replace(/\.+$/, '') : 'Untitled';
+            const title = cleanTitle(article.title) || 'Untitled';
             const isBook = article.coverType === 'book';
-            const pub = article.publication ? article.publication.trim() : '';
-            const doi = article.doi ? article.doi.trim() : '';
+            const pub = oneLine(article.publication);
+            const doi = article.doi ? String(article.doi).trim() : '';
 
-            let citation = `${authorPart} ${year}. `;
-            if (isBook) {
-                citation += `${title}. ${pub ? pub + '.' : ''}`;
+            const titlePart = isBook ? endPunct(title) : `"${endPunct(title)}"`;
+
+            let citation;
+            if (authorText) {
+                citation = `${endPunct(authorText)} ${endPunct(year)} ${titlePart}`;
             } else {
-                citation += `"${title}." `;
-                if (pub) {
-                    citation += `${pub}`;
-                    if (article.volume) {
-                        citation += ` ${article.volume}`;
-                        if (article.issue) citation += `, no. ${article.issue}`;
-                    }
-                    if (article.pages) {
-                        citation += `: ${article.pages}`;
-                    }
-                    citation += '.';
+                // No author: start with the title, followed by the year
+                citation = `${titlePart} ${endPunct(year)}`;
+            }
+
+            if (isBook) {
+                if (pub) citation += ` ${endPunct(pub)}`;
+            } else if (pub) {
+                let src = pub;
+                if (article.volume) {
+                    src += ` ${article.volume}`;
+                    if (article.issue) src += `, no. ${article.issue}`;
                 }
+                if (article.pages) {
+                    src += `: ${article.pages}`;
+                }
+                citation += ` ${endPunct(src)}`;
             }
 
             if (doi) {
-                let doiUrl = doi;
-                if (/arxiv/i.test(doi)) {
-                    const cleanArxiv = doi.replace(/^arxiv:\s*/i, '').replace(/^10\.48550\/arxiv\./i, '');
-                    doiUrl = `https://arxiv.org/abs/${cleanArxiv}`;
-                } else if (!doiUrl.startsWith('http')) {
-                    doiUrl = `https://doi.org/${doi}`;
-                }
-                citation += ` ${doiUrl}.`;
+                citation += ` ${doiToUrl(doi)}.`;
             }
 
             return citation;
@@ -828,32 +1151,23 @@ window.Lexicon = window.Lexicon || {};
         formatVancouver(article) {
             if (!article) return '';
             const authors = this.parseAuthors(article.authors);
-            let authorText = '';
+            const vName = (a) => (a.isOrg || !a.initialsCompact) ? a.family : `${a.family} ${a.initialsCompact}`;
 
-            if (authors.length === 0) {
-                authorText = article.title || 'Unknown';
-            } else if (authors.length <= 6) {
-                authorText = authors.map(a => {
-                    const fam = a.family || a.raw;
-                    return a.initialsCompact ? `${fam} ${a.initialsCompact}` : fam;
-                }).join(', ');
-            } else {
-                const first6 = authors.slice(0, 6).map(a => {
-                    const fam = a.family || a.raw;
-                    return a.initialsCompact ? `${fam} ${a.initialsCompact}` : fam;
-                }).join(', ');
-                authorText = `${first6}, et al.`;
+            let authorText = '';
+            if (authors.length > 0 && authors.length <= 6) {
+                authorText = authors.map(vName).join(', ');
+            } else if (authors.length > 6) {
+                authorText = `${authors.slice(0, 6).map(vName).join(', ')}, et al.`;
             }
 
-            const authorPart = authorText.endsWith('.') ? authorText : authorText + '.';
-            const title = article.title ? article.title.trim().replace(/\.+$/, '') : 'Untitled';
-            const pub = article.publication ? article.publication.trim() : '';
+            const title = cleanTitle(article.title) || 'Untitled';
+            const pub = oneLine(article.publication);
             const year = article.year || '';
-            const doi = article.doi ? article.doi.trim() : '';
+            const doi = article.doi ? String(article.doi).trim() : '';
 
-            let citation = `${authorPart} ${title}.`;
+            let citation = authorText ? `${endPunct(authorText)} ${endPunct(title)}` : endPunct(title);
             if (pub) {
-                citation += ` ${pub}.`;
+                citation += ` ${endPunct(pub)}`;
                 if (year) {
                     citation += ` ${year}`;
                     if (article.volume) {
@@ -870,29 +1184,32 @@ window.Lexicon = window.Lexicon || {};
             }
 
             if (doi) {
-                const cleanDoi = doi.replace(/^https?:\/\/doi\.org\//i, '');
-                citation += ` doi:${cleanDoi}`;
+                citation += isRealDoi(doi) ? ` doi:${normalizeDoi(doi)}` : ` Available from: ${doiToUrl(doi)}`;
             }
 
             return citation;
         },
 
         /**
-         * Generates clean unique citation key for BibTeX
+         * Generates clean citation key for BibTeX (ASCII, diacritics stripped)
          * @param {Object} article 
          * @returns {string}
          */
         generateCiteKey(article) {
-            const authors = this.parseAuthors(article.authors);
-            let authorPart = 'doc';
-            if (authors.length > 0 && authors[0].family) {
-                authorPart = authors[0].family.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const authors = this.parseAuthors(article && article.authors);
+            const asciiLower = (s) => stripDiacritics(s).toLowerCase();
+            let authorPart = '';
+            if (authors.length > 0) {
+                const a = authors[0];
+                const base = a.isOrg ? a.family.split(/\s+/)[0] : (a.familyCore || a.family);
+                authorPart = asciiLower(base).replace(/[^a-z0-9]/g, '');
             }
-            const yearPart = article.year || 'nodate';
+            if (!authorPart) authorPart = 'doc';
+            const yearPart = String((article && article.year) || 'nodate').replace(/[^A-Za-z0-9]/g, '') || 'nodate';
             let titleWord = '';
-            if (article.title) {
-                const words = article.title.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
-                const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'of', 'and', 'for', 'to', 'with', 'by', 'at', 'from', 'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'em', 'para', 'com']);
+            if (article && article.title) {
+                const words = asciiLower(article.title).replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+                const stopWords = new Set(['the', 'a', 'an', 'in', 'on', 'of', 'and', 'for', 'to', 'with', 'by', 'at', 'from', 'o', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na', 'para', 'com', 'e', 'por', 'sobre']);
                 const significant = words.find(w => w.length > 2 && !stopWords.has(w));
                 titleWord = significant || words[0] || '';
             }
@@ -900,63 +1217,81 @@ window.Lexicon = window.Lexicon || {};
         },
 
         /**
+         * Generates unique cite keys for a batch (duplicates get a, b, c... suffixes)
+         * @param {Array<Object>} articles
+         * @returns {Array<string>}
+         */
+        generateUniqueCiteKeys(articles) {
+            const used = new Set();
+            return (articles || []).map(a => {
+                const base = this.generateCiteKey(a);
+                let key = base;
+                let n = 0;
+                while (used.has(key)) {
+                    key = base + this._suffix(n++);
+                }
+                used.add(key);
+                return key;
+            });
+        },
+
+        /** 0 -> a, 25 -> z, 26 -> aa ... */
+        _suffix(n) {
+            let s = '';
+            n = n + 1;
+            while (n > 0) {
+                const r = (n - 1) % 26;
+                s = String.fromCharCode(97 + r) + s;
+                n = Math.floor((n - 1) / 26);
+            }
+            return s;
+        },
+
+        /**
          * Generates standardized BibTeX string (.bib)
          * @param {Object} article 
+         * @param {string} [keyOverride] cite key to use (for de-duplicated batch export)
          * @returns {string}
          */
-        toBibTeX(article) {
+        toBibTeX(article, keyOverride) {
             if (!article) return '';
             const isBook = article.coverType === 'book';
-            const type = isBook ? 'book' : 'article';
-            const key = this.generateCiteKey(article);
+            const pub = oneLine(article.publication);
+            const type = isBook ? 'book' : (pub ? 'article' : 'misc');
+            const key = keyOverride || this.generateCiteKey(article);
 
             const authors = this.parseAuthors(article.authors);
-            let bibAuthors = '';
-            if (authors.length > 0) {
-                bibAuthors = authors.map(a => {
-                    if (a.family && a.given) {
-                        return `${a.family}, ${a.given}`;
-                    }
-                    return a.raw;
-                }).join(' and ');
-            } else {
-                bibAuthors = article.authors || '';
-            }
+            const bibAuthors = authors.map(a => {
+                if (a.isOrg) return `{${texEscape(a.family)}}`;
+                if (a.family && a.given) return `${texEscape(a.family)}, ${texEscape(a.given)}`;
+                return texEscape(a.family || a.raw);
+            }).join(' and ');
 
-            const lines = [];
-            lines.push(`@${type}{${key},`);
-            if (article.title) lines.push(`  title = {${article.title}},`);
-            if (bibAuthors) lines.push(`  author = {${bibAuthors}},`);
-            if (isBook) {
-                if (article.publication) lines.push(`  publisher = {${article.publication}},`);
-            } else {
-                if (article.publication) lines.push(`  journal = {${article.publication}},`);
-            }
-            if (article.year) lines.push(`  year = {${article.year}},`);
-            if (article.volume) lines.push(`  volume = {${article.volume}},`);
-            if (article.issue) lines.push(`  number = {${article.issue}},`);
-            if (article.pages) lines.push(`  pages = {${article.pages}},`);
+            const fields = [];
+            const add = (name, value) => { if (value) fields.push(`  ${name} = {${value}}`); };
+
+            add('title', texEscape(article.title));
+            add('author', bibAuthors);
+            if (isBook) add('publisher', texEscape(pub));
+            else if (pub) add('journal', texEscape(pub));
+            add('year', texEscape(article.year));
+            add('volume', texEscape(article.volume));
+            add('number', texEscape(article.issue));
+            if (article.pages) add('pages', texEscape(String(article.pages).replace(/\s*[-–—]+\s*/g, '--')));
             if (article.doi) {
-                const cleanDoi = article.doi.replace(/^https?:\/\/doi\.org\//i, '');
-                lines.push(`  doi = {${cleanDoi}},`);
-                const url = article.doi.startsWith('http') ? article.doi : `https://doi.org/${cleanDoi}`;
-                lines.push(`  url = {${url}},`);
+                const raw = String(article.doi).trim();
+                if (isRealDoi(raw)) add('doi', texUrlEscape(normalizeDoi(raw)));
+                add('url', texUrlEscape(doiToUrl(raw)));
             }
-            if (article.summary) {
-                const cleanSummary = article.summary.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
-                lines.push(`  abstract = {${cleanSummary}},`);
-            }
-            if (article.tags && Array.isArray(article.tags) && article.tags.length > 0) {
-                lines.push(`  keywords = {${article.tags.join(', ')}},`);
+            if (article.summary) add('abstract', texEscape(article.summary));
+            if (Array.isArray(article.tags)) {
+                const kw = article.tags.filter(tg => typeof tg === 'string' && tg.trim()).map(tg => texEscape(tg)).join(', ');
+                add('keywords', kw);
             }
 
-            // Remove trailing comma from last property
-            const lastIdx = lines.length - 1;
-            if (lines[lastIdx].endsWith(',')) {
-                lines[lastIdx] = lines[lastIdx].slice(0, -1);
-            }
-            lines.push('}');
-            return lines.join('\n');
+            const header = `@${type}{${key},`;
+            if (!fields.length) return `${header}\n}`;
+            return `${header}\n${fields.join(',\n')}\n}`;
         },
 
         /**
@@ -967,55 +1302,49 @@ window.Lexicon = window.Lexicon || {};
         toRIS(article) {
             if (!article) return '';
             const isBook = article.coverType === 'book';
-            const type = isBook ? 'BOOK' : 'JOUR';
+            const pub = oneLine(article.publication);
+            const type = isBook ? 'BOOK' : (pub ? 'JOUR' : 'GEN');
             const lines = [];
+            const add = (tag, value) => {
+                const v = oneLine(value);
+                if (v) lines.push(`${tag}  - ${v}`);
+            };
 
             lines.push(`TY  - ${type}`);
-            if (article.title) lines.push(`TI  - ${article.title}`);
+            add('TI', article.title);
 
             const authors = this.parseAuthors(article.authors);
-            if (authors.length > 0) {
-                authors.forEach(a => {
-                    if (a.family && a.given) {
-                        lines.push(`AU  - ${a.family}, ${a.given}`);
-                    } else {
-                        lines.push(`AU  - ${a.raw}`);
-                    }
-                });
-            } else if (article.authors) {
-                lines.push(`AU  - ${article.authors}`);
-            }
+            authors.forEach(a => {
+                if (!a.isOrg && a.family && a.given) add('AU', `${a.family}, ${a.given}`);
+                else add('AU', a.family || a.raw);
+            });
 
-            if (isBook) {
-                if (article.publication) lines.push(`PB  - ${article.publication}`);
-            } else {
-                if (article.publication) lines.push(`T2  - ${article.publication}`);
-            }
+            if (isBook) add('PB', pub);
+            else add('T2', pub);
 
-            if (article.year) lines.push(`PY  - ${article.year}`);
-            if (article.volume) lines.push(`VL  - ${article.volume}`);
-            if (article.issue) lines.push(`IS  - ${article.issue}`);
+            add('PY', article.year);
+            add('VL', article.volume);
+            add('IS', article.issue);
             if (article.pages) {
-                const pParts = String(article.pages).split(/[-–]/);
-                if (pParts.length > 1) {
-                    lines.push(`SP  - ${pParts[0].trim()}`);
-                    lines.push(`EP  - ${pParts[1].trim()}`);
+                const pagesStr = oneLine(article.pages);
+                const m = pagesStr.match(/^([^-–—]+?)\s*[-–—]+\s*(.+)$/);
+                const pageToken = /^(?:[A-Za-z]{0,3}\d+[A-Za-z]{0,3}|[ivxlcdm]+)$/i;
+                if (m && pageToken.test(m[1].trim()) && pageToken.test(m[2].trim())) {
+                    add('SP', m[1]);
+                    add('EP', m[2]);
                 } else {
-                    lines.push(`SP  - ${String(article.pages).trim()}`);
+                    add('SP', pagesStr);
                 }
             }
             if (article.doi) {
-                const cleanDoi = article.doi.replace(/^https?:\/\/doi\.org\//i, '');
-                lines.push(`DO  - ${cleanDoi}`);
-                const url = article.doi.startsWith('http') ? article.doi : `https://doi.org/${cleanDoi}`;
-                lines.push(`UR  - ${url}`);
+                const raw = String(article.doi).trim();
+                if (isRealDoi(raw)) add('DO', normalizeDoi(raw));
+                add('UR', doiToUrl(raw));
             }
-            if (article.summary) {
-                lines.push(`AB  - ${article.summary.replace(/\s+/g, ' ').trim()}`);
-            }
+            add('AB', article.summary);
             if (Array.isArray(article.tags)) {
                 article.tags.forEach(tag => {
-                    lines.push(`KW  - ${tag}`);
+                    if (typeof tag === 'string') add('KW', tag);
                 });
             }
             lines.push('ER  - ');
@@ -1037,22 +1366,28 @@ window.Lexicon = window.Lexicon || {};
                 }
             }
             // Fallback for document.execCommand
+            const previouslyFocused = document.activeElement;
             const textarea = document.createElement('textarea');
             textarea.value = text;
+            textarea.setAttribute('readonly', '');
             textarea.style.position = 'fixed';
             textarea.style.left = '-9999px';
             textarea.style.top = '-9999px';
             document.body.appendChild(textarea);
             textarea.focus();
             textarea.select();
+            let successful = false;
             try {
-                const successful = document.execCommand('copy');
-                document.body.removeChild(textarea);
-                return successful;
+                successful = document.execCommand('copy');
             } catch (err) {
-                document.body.removeChild(textarea);
-                return false;
+                successful = false;
+            } finally {
+                if (textarea.parentNode) textarea.parentNode.removeChild(textarea);
+                if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+                    try { previouslyFocused.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+                }
             }
+            return successful;
         },
 
         /**
@@ -1070,7 +1405,21 @@ window.Lexicon = window.Lexicon || {};
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            // Revoking immediately can cancel the download in some browsers
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        },
+
+        _getInspectedArticle() {
+            const state = window.Lexicon.State;
+            if (!state || !Array.isArray(state.articles)) return null;
+            return state.articles.find(a => a.id === state.inspectedArticleId) || null;
+        },
+
+        _getSelectedArticles() {
+            const state = window.Lexicon.State;
+            if (!state || !Array.isArray(state.articles)) return [];
+            const ids = new Set(state.selectedIds || []);
+            return state.articles.filter(a => ids.has(a.id));
         },
 
         /**
@@ -1078,8 +1427,7 @@ window.Lexicon = window.Lexicon || {};
          * @param {'abnt'|'apa'|'chicago'|'vancouver'} format 
          */
         async copyCitationForInspected(format) {
-            const state = window.Lexicon.State;
-            const article = state.articles.find(a => a.id === state.inspectedArticleId);
+            const article = this._getInspectedArticle();
             if (!article) return;
 
             this.closeCiteMenu();
@@ -1088,10 +1436,6 @@ window.Lexicon = window.Lexicon || {};
             let formatName = '';
 
             switch (format) {
-                case 'abnt':
-                    citation = this.formatABNT(article);
-                    formatName = 'ABNT';
-                    break;
                 case 'apa':
                     citation = this.formatAPA(article);
                     formatName = 'APA 7';
@@ -1104,6 +1448,7 @@ window.Lexicon = window.Lexicon || {};
                     citation = this.formatVancouver(article);
                     formatName = 'Vancouver';
                     break;
+                case 'abnt':
                 default:
                     citation = this.formatABNT(article);
                     formatName = 'ABNT';
@@ -1111,12 +1456,9 @@ window.Lexicon = window.Lexicon || {};
 
             const success = await this.copyToClipboard(citation);
             if (success) {
-                const toastMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.copiedCitation', { format: formatName })
-                    : `Reference copied in ${formatName} format!`;
-                window.Lexicon.UI.Toast.show(toastMsg, 'success');
+                toast(tr('inspector.copiedCitation', 'Referência copiada no formato {format}!', { format: formatName }), 'success');
             } else {
-                window.Lexicon.UI.Toast.show('Error copying to clipboard', 'error');
+                toast(tr('academic.clipboardError', 'Erro ao copiar para a área de transferência'), 'error');
             }
         },
 
@@ -1124,8 +1466,7 @@ window.Lexicon = window.Lexicon || {};
          * Copies BibTeX entry for inspected document to clipboard
          */
         async copyBibTeXForInspected() {
-            const state = window.Lexicon.State;
-            const article = state.articles.find(a => a.id === state.inspectedArticleId);
+            const article = this._getInspectedArticle();
             if (!article) return;
 
             this.closeCiteMenu();
@@ -1133,12 +1474,9 @@ window.Lexicon = window.Lexicon || {};
             const success = await this.copyToClipboard(bibtex);
 
             if (success) {
-                const toastMsg = window.Lexicon.I18n
-                    ? window.Lexicon.I18n.t('inspector.copiedBibtex')
-                    : 'BibTeX entry copied to clipboard!';
-                window.Lexicon.UI.Toast.show(toastMsg, 'success');
+                toast(tr('inspector.copiedBibtex', 'Entrada BibTeX copiada!'), 'success');
             } else {
-                window.Lexicon.UI.Toast.show('Error copying to clipboard', 'error');
+                toast(tr('academic.clipboardError', 'Erro ao copiar para a área de transferência'), 'error');
             }
         },
 
@@ -1146,27 +1484,22 @@ window.Lexicon = window.Lexicon || {};
          * Downloads individual .bib file for inspected document
          */
         downloadBibTeXForInspected() {
-            const state = window.Lexicon.State;
-            const article = state.articles.find(a => a.id === state.inspectedArticleId);
+            const article = this._getInspectedArticle();
             if (!article) return;
 
             this.closeCiteMenu();
             const bibtex = this.toBibTeX(article);
             const key = this.generateCiteKey(article);
-            this.downloadFile(bibtex, `${key}.bib`, 'application/x-bibtex');
+            this.downloadFile(bibtex + '\n', `${key}.bib`, 'application/x-bibtex');
 
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('inspector.downloadedBibtex')
-                : 'BibTeX file (.bib) downloaded!';
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            toast(tr('inspector.downloadedBibtex', 'Arquivo BibTeX (.bib) baixado!'), 'success');
         },
 
         /**
          * Downloads individual .ris file for inspected document
          */
         downloadRISForInspected() {
-            const state = window.Lexicon.State;
-            const article = state.articles.find(a => a.id === state.inspectedArticleId);
+            const article = this._getInspectedArticle();
             if (!article) return;
 
             this.closeCiteMenu();
@@ -1174,55 +1507,44 @@ window.Lexicon = window.Lexicon || {};
             const key = this.generateCiteKey(article);
             this.downloadFile(ris, `${key}.ris`, 'application/x-research-info-systems');
 
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('inspector.downloadedRis')
-                : 'RIS file (.ris) downloaded for Zotero/Mendeley!';
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            toast(tr('inspector.downloadedRis', 'Arquivo RIS (.ris) baixado para Zotero/Mendeley!'), 'success');
         },
 
         /**
          * Batch export of selected articles as a consolidated .bib file
          */
         batchExportBibTeX() {
-            const state = window.Lexicon.State;
-            const selectedArticles = state.articles.filter(a => state.selectedIds.includes(a.id));
+            const selectedArticles = this._getSelectedArticles();
             if (!selectedArticles.length) {
-                window.Lexicon.UI.Toast.show('No documents selected', 'info');
+                toast(tr('academic.noDocumentsSelected', 'Nenhum documento selecionado'), 'info');
                 return;
             }
 
-            const header = `% Lexicon Research Library - Consolidated BibTeX Export\n% Exported: ${new Date().toISOString()}\n% Total Entries: ${selectedArticles.length}\n\n`;
-            const entries = selectedArticles.map(a => this.toBibTeX(a)).join('\n\n');
+            const today = localDateStr();
+            const keys = this.generateUniqueCiteKeys(selectedArticles);
+            const header = `% Lexicon Research Library - Consolidated BibTeX Export\n% Exported: ${today}\n% Total Entries: ${selectedArticles.length}\n\n`;
+            const entries = selectedArticles.map((a, i) => this.toBibTeX(a, keys[i])).join('\n\n');
             const fullContent = header + entries + '\n';
 
-            const filename = `Lexicon_Export_${new Date().toISOString().split('T')[0]}.bib`;
-            this.downloadFile(fullContent, filename, 'application/x-bibtex');
+            this.downloadFile(fullContent, `Lexicon_Export_${today}.bib`, 'application/x-bibtex');
 
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.exportedBibtex', { count: selectedArticles.length })
-                : `Exported ${selectedArticles.length} citations as BibTeX (.bib)`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            toast(tr('batch.exportedBibtex', '{count} referências exportadas em BibTeX (.bib)', { count: selectedArticles.length }), 'success');
         },
 
         /**
          * Batch export of selected articles as a consolidated .ris file
          */
         batchExportRIS() {
-            const state = window.Lexicon.State;
-            const selectedArticles = state.articles.filter(a => state.selectedIds.includes(a.id));
+            const selectedArticles = this._getSelectedArticles();
             if (!selectedArticles.length) {
-                window.Lexicon.UI.Toast.show('No documents selected', 'info');
+                toast(tr('academic.noDocumentsSelected', 'Nenhum documento selecionado'), 'info');
                 return;
             }
 
             const entries = selectedArticles.map(a => this.toRIS(a)).join('\r\n');
-            const filename = `Lexicon_Export_${new Date().toISOString().split('T')[0]}.ris`;
-            this.downloadFile(entries, filename, 'application/x-research-info-systems');
+            this.downloadFile(entries, `Lexicon_Export_${localDateStr()}.ris`, 'application/x-research-info-systems');
 
-            const toastMsg = window.Lexicon.I18n
-                ? window.Lexicon.I18n.t('batch.exportedRis', { count: selectedArticles.length })
-                : `Exported ${selectedArticles.length} references as RIS (.ris)`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            toast(tr('batch.exportedRis', '{count} referências exportadas em RIS (.ris)', { count: selectedArticles.length }), 'success');
         },
 
         /**
@@ -1231,10 +1553,9 @@ window.Lexicon = window.Lexicon || {};
          * @param {Object} [articleParam]
          */
         exportConsolidatedMarkdown(articleParam) {
-            const state = window.Lexicon.State;
-            const article = articleParam || state.articles.find(a => a.id === state.inspectedArticleId);
+            const article = articleParam || this._getInspectedArticle();
             if (!article) {
-                window.Lexicon.UI.Toast.show('Nenhum documento selecionado para exportação', 'error');
+                toast(tr('academic.noDocumentForExport', 'Nenhum documento selecionado para exportação'), 'error');
                 return;
             }
 
@@ -1242,41 +1563,49 @@ window.Lexicon = window.Lexicon || {};
             const apa = this.formatAPA(article);
             const chicago = this.formatChicago(article);
             const bibtex = this.toBibTeX(article);
+            const untitled = tr('academic.untitled', 'Sem título');
 
             // Fetch backlinks if Zettelkasten is available
             let backlinksSection = '';
-            if (window.Lexicon.Zettelkasten) {
-                const backlinks = window.Lexicon.Zettelkasten.getBacklinks(article);
+            if (window.Lexicon.Zettelkasten && typeof window.Lexicon.Zettelkasten.getBacklinks === 'function') {
+                const backlinks = window.Lexicon.Zettelkasten.getBacklinks(article) || [];
                 if (backlinks.length > 0) {
-                    backlinksSection = backlinks.map(b => `- [[${b.sourceArticle.title}]] (${b.sourceArticle.year || 'N/A'}): "${b.snippet}"`).join('\n');
+                    backlinksSection = backlinks.map(b => {
+                        const src = b.sourceArticle || {};
+                        return `- [[${oneLine(src.title) || untitled}]] (${src.year || 'N/A'}): "${oneLine(b.snippet)}"`;
+                    }).join('\n');
                 } else {
-                    backlinksSection = '_Nenhuma nota externa cita este documento até o momento._';
+                    backlinksSection = tr('academic.mdNoBacklinks', '_Nenhuma nota externa cita este documento até o momento._');
                 }
             }
 
-            const yamlTags = (article.tags || []).map(t => `"${t}"`).join(', ');
+            const tags = Array.isArray(article.tags) ? article.tags.filter(tg => typeof tg === 'string') : [];
+            const yamlTags = tags.map(yamlStr).join(', ');
+            const yearNum = article.year !== undefined && article.year !== null && /^\d{1,4}$/.test(String(article.year).trim())
+                ? String(article.year).trim()
+                : (article.year ? yamlStr(article.year) : 'null');
 
             const mdContent = [
                 '---',
-                `title: "${(article.title || 'Sem título').replace(/"/g, '\\"')}"`,
-                `authors: "${(article.authors || '').replace(/"/g, '\\"')}"`,
-                `year: ${article.year || 'null'}`,
-                `publication: "${(article.publication || '').replace(/"/g, '\\"')}"`,
-                `doi: "${article.doi || ''}"`,
-                `collection: "${(article.collection || '').replace(/"/g, '\\"')}"`,
+                `title: ${yamlStr(oneLine(article.title) || untitled)}`,
+                `authors: ${yamlStr(article.authors || '')}`,
+                `year: ${yearNum}`,
+                `publication: ${yamlStr(article.publication || '')}`,
+                `doi: ${yamlStr(normalizeDoi(article.doi))}`,
+                `collection: ${yamlStr(article.collection || '')}`,
                 `tags: [${yamlTags}]`,
-                `status: "${article.status || 'inbox'}"`,
-                `date_added: "${article.addedDate || ''}"`,
+                `status: ${yamlStr(article.status || 'inbox')}`,
+                `date_added: ${yamlStr(article.addedDate || '')}`,
                 'exported_from: "Lexicon Research Manager"',
                 '---',
                 '',
-                `# ${article.title || 'Fichamento de Pesquisa'}`,
+                `# ${oneLine(article.title) || tr('academic.mdDefaultHeading', 'Fichamento de Pesquisa')}`,
                 '',
-                '## 📚 Referências Bibliográficas Formatadas',
+                `## 📚 ${tr('academic.mdReferencesHeading', 'Referências Bibliográficas Formatadas')}`,
                 '',
                 `- **ABNT NBR 6023:** ${abnt}`,
-                `- **APA 7ª edição:** ${apa}`,
-                `- **Chicago 17ª ed.:** ${chicago}`,
+                `- **APA 7:** ${apa}`,
+                `- **Chicago 17:** ${chicago}`,
                 '',
                 '### BibTeX',
                 '```bibtex',
@@ -1285,37 +1614,35 @@ window.Lexicon = window.Lexicon || {};
                 '',
                 '---',
                 '',
-                '## 📄 Resumo Executivo / Abstract',
+                `## 📄 ${tr('academic.mdAbstractHeading', 'Resumo Executivo / Abstract')}`,
                 '',
-                article.summary || '_Nenhum resumo registrado._',
-                '',
-                '---',
-                '',
-                '## 📝 Fichamento & Anotações de Leitura',
-                '',
-                article.notes || '_Nenhum fichamento registrado._',
+                article.summary || tr('academic.mdNoAbstract', '_Nenhum resumo registrado._'),
                 '',
                 '---',
                 '',
-                '## 🔗 Citações Reversas & Backlinks (Zettelkasten)',
+                `## 📝 ${tr('academic.mdNotesHeading', 'Fichamento & Anotações de Leitura')}`,
+                '',
+                article.notes || tr('academic.mdNoNotes', '_Nenhum fichamento registrado._'),
+                '',
+                '---',
+                '',
+                `## 🔗 ${tr('academic.mdBacklinksHeading', 'Citações Reversas & Backlinks (Zettelkasten)')}`,
                 '',
                 backlinksSection,
                 ''
             ].join('\n');
 
-            const safeName = (article.title || 'artigo')
+            const safeName = stripDiacritics(article.title || 'artigo')
                 .toLowerCase()
-                .replace(/[^a-z0-9]+/gi, '_')
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '')
                 .substring(0, 40)
                 .replace(/^_+|_+$/g, '');
 
-            const fileName = `fichamento_${safeName || article.id}.md`;
+            const fileName = `${tr('academic.mdFilePrefix', 'fichamento')}_${safeName || article.id}.md`;
             this.downloadFile(mdContent, fileName, 'text/markdown;charset=utf-8');
 
-            const toastMsg = window.Lexicon.I18n
-                ? (window.Lexicon.I18n.t('inspector.exportedNotesSuccess') || `Fichamento estruturado exportado (.md)!`)
-                : `Fichamento estruturado exportado (.md)!`;
-            window.Lexicon.UI.Toast.show(toastMsg, 'success');
+            toast(tr('inspector.exportedNotesSuccess', 'Fichamento estruturado exportado (.md)!'), 'success');
         },
 
         /**
@@ -1341,9 +1668,12 @@ window.Lexicon = window.Lexicon || {};
         },
 
         /**
-         * Initializes listeners for document clicks to close dropdowns
+         * Initializes listeners for document clicks to close dropdowns (idempotent)
          */
         init() {
+            if (initialized) return;
+            initialized = true;
+
             document.addEventListener('click', (e) => {
                 const container = document.getElementById('inspector-cite-menu-container');
                 if (container && !container.contains(e.target)) {
@@ -1351,16 +1681,15 @@ window.Lexicon = window.Lexicon || {};
                 }
             });
 
-            // Allow pressing Enter in DOI inputs to trigger metadata fetch
+            // Allow pressing Enter in DOI inputs to trigger metadata fetch (respects in-flight guards)
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    if (e.target && e.target.id === 'inspector-doi') {
-                        e.preventDefault();
-                        this.fetchInspectorMetadata();
-                    } else if (e.target && e.target.id === 'form-doi') {
-                        e.preventDefault();
-                        this.fetchUploadFormMetadata();
-                    }
+                if (e.key !== 'Enter' || !e.target) return;
+                if (e.target.id === 'inspector-doi') {
+                    e.preventDefault();
+                    if (!inspectorFetchInFlight) this.fetchInspectorMetadata();
+                } else if (e.target.id === 'form-doi') {
+                    e.preventDefault();
+                    if (!formFetchInFlight) this.fetchUploadFormMetadata();
                 }
             });
         }
